@@ -86,7 +86,6 @@ class GraphQueries:
                 continue
             if data.get("encrypted") is False or data.get("protocol") == "TCP":
                 src_node = self._g.get_node(src) or {}
-                self._g.get_node(tgt) or {}
 
                 if environment:
                     src_srv = self._g.get_node(f"server:{src_node.get('server')}")
@@ -103,7 +102,7 @@ class GraphQueries:
                 )
         return results
 
-    def get_dependency_chain(self, hostname: str, max_depth: int = 5) -> list[dict]:
+    def get_dependency_chain(self, hostname: str, max_depth: int = 5) -> dict:
         """서버를 기점으로 의존성 체인을 추적한다.
 
         이 서버의 서비스를 호출하는 upstream과

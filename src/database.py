@@ -5,6 +5,9 @@ SQLite 데이터베이스 초기화 + 연결 관리.
   - ontology.db: 그래프 (nodes + edges)
   - events.db: Tetragon 이벤트 큐
   - app.db: 사용자, 승인, 감사 로그
+
+Connection은 DB당 하나만 유지 (singleton). check_same_thread=False로
+FastAPI async 환경에서 안전하게 공유. WAL 모드로 동시 읽기 지원.
 """
 
 from __future__ import annotations
@@ -16,9 +19,18 @@ from src.config import settings
 
 _DATA_DIR = Path(settings.data_directory)
 
+_connections: dict[str, sqlite3.Connection] = {}
+
 
 def _connect(db_name: str) -> sqlite3.Connection:
-    """WAL 모드 SQLite 연결을 생성한다."""
+    """WAL 모드 SQLite 연결을 생성하거나 기존 연결을 반환한다."""
+    if db_name in _connections:
+        try:
+            _connections[db_name].execute("SELECT 1")
+            return _connections[db_name]
+        except sqlite3.ProgrammingError:
+            del _connections[db_name]
+
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     db_path = _DATA_DIR / db_name
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
@@ -26,6 +38,7 @@ def _connect(db_name: str) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=5000")
+    _connections[db_name] = conn
     return conn
 
 
@@ -39,6 +52,13 @@ def get_events_db() -> sqlite3.Connection:
 
 def get_app_db() -> sqlite3.Connection:
     return _connect("app.db")
+
+
+def close_all() -> None:
+    """앱 종료 시 모든 DB 연결을 닫는다."""
+    for conn in _connections.values():
+        conn.close()
+    _connections.clear()
 
 
 def init_all_databases() -> None:
@@ -70,7 +90,6 @@ def init_all_databases() -> None:
         CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id);
         CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(type);
     """)
-    conn.close()
 
     # ─── events.db ────────────────────────
     conn = get_events_db()
@@ -85,7 +104,6 @@ def init_all_databases() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_events_status ON event_queue(status);
     """)
-    conn.close()
 
     # ─── app.db ───────────────────────────
     conn = get_app_db()
@@ -111,4 +129,3 @@ def init_all_databases() -> None:
             created_at  TEXT DEFAULT (datetime('now'))
         );
     """)
-    conn.close()

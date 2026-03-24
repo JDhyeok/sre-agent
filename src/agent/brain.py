@@ -1,24 +1,32 @@
 """
 AI Agent Brain — Claude API + GraphStore(SQLite/NetworkX) 컨텍스트 주입.
+
+GraphQueries로 고수준 쿼리, SkillResolver로 스킬 적용 대상 탐색,
+approval 모듈로 실행 계획 영속화.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import uuid
+from typing import Any
 
 import anthropic
 
+from src.agent.approval import submit_plan
 from src.config import settings
+from src.graph.queries import GraphQueries
 from src.graph.store import GraphStore
 from src.models.schemas import ApprovalStatus, ExecutionPlan
 from src.skills.loader import load_all_skills
+from src.skills.resolver import SkillResolver
 
 logger = logging.getLogger(__name__)
 
+_MAX_HISTORY = 50
+
 SYSTEM_PROMPT = """\
-당신은 SRE 운영 자동화 에이전트입니다. 수십~수백 대 서버 인프라의 장애 대응, 
+당신은 SRE 운영 자동화 에이전트입니다. 수십~수백 대 서버 인프라의 장애 대응, \
 보안 패치, EoS 관리, PM 작업 등을 지원합니다.
 
 ## 핵심 규칙
@@ -34,19 +42,25 @@ SYSTEM_PROMPT = """\
 
 class SREAgentBrain:
     def __init__(self, graph: GraphStore) -> None:
-        client_kwargs = {"api_key": settings.anthropic_api_key}
+        client_kwargs: dict[str, Any] = {"api_key": settings.anthropic_api_key}
         if settings.anthropic_base_url:
             client_kwargs["base_url"] = settings.anthropic_base_url
         self._client = anthropic.AsyncAnthropic(**client_kwargs)
         self._graph = graph
+        self._queries = GraphQueries(graph)
+        self._resolver = SkillResolver(graph)
         self._skills = load_all_skills()
         self._history: list[dict] = []
+
+    def _trim_history(self) -> None:
+        if len(self._history) > _MAX_HISTORY:
+            self._history = self._history[-_MAX_HISTORY:]
 
     def _build_tools(self) -> list[dict]:
         return [
             {
                 "name": "query_server",
-                "description": "서버 상세 정보 조회 (OS, 패키지, 서비스, 주의사항)",
+                "description": "서버 상세 정보 조회 (서비스, 패키지, 장애 이력, 주의사항 포함)",
                 "input_schema": {
                     "type": "object",
                     "properties": {"hostname": {"type": "string"}},
@@ -81,7 +95,28 @@ class SREAgentBrain:
                 "description": "과거 장애 이력 검색",
                 "input_schema": {
                     "type": "object",
-                    "properties": {"hostname": {"type": "string"}, "keyword": {"type": "string"}},
+                    "properties": {
+                        "hostname": {"type": "string"},
+                        "keyword": {"type": "string"},
+                    },
+                },
+            },
+            {
+                "name": "get_dependency_chain",
+                "description": "서버 기점 upstream/downstream 의존성 체인 추적",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"hostname": {"type": "string"}},
+                    "required": ["hostname"],
+                },
+            },
+            {
+                "name": "find_applicable_servers",
+                "description": "스킬의 scope 조건에 맞는 서버 목록 조회",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"skill_id": {"type": "string"}},
+                    "required": ["skill_id"],
                 },
             },
             {
@@ -91,7 +126,10 @@ class SREAgentBrain:
                     "type": "object",
                     "properties": {
                         "skill_id": {"type": "string"},
-                        "target_servers": {"type": "array", "items": {"type": "string"}},
+                        "target_servers": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
                         "reason": {"type": "string"},
                     },
                     "required": ["skill_id", "target_servers", "reason"],
@@ -100,48 +138,47 @@ class SREAgentBrain:
         ]
 
     async def _execute_tool(self, name: str, inp: dict) -> str:
+        result: Any
+
         if name == "query_server":
-            hostname = inp["hostname"]
-            server = self._graph.get_node(f"server:{hostname}")
-            edges = self._graph.get_edges_to(f"server:{hostname}", "HOSTED_ON")
-            services = [self._graph.get_node(e["source"]) for e in edges]
-            result = {"server": server, "services": services}
+            result = self._queries.get_server_full(inp["hostname"])
+            if result is None:
+                result = {"error": f"Server '{inp['hostname']}' not found"}
 
         elif name == "blast_radius":
             result = self._graph.blast_radius(f"server:{inp['hostname']}")
 
         elif name == "find_servers_by_package":
-            pkg_name = inp["package_name"]
-            # 패키지 노드에서 INSTALLED_ON edge를 따라 서버 찾기
-            pkg_nodes = self._graph.find_nodes("Package", name=pkg_name)
-            servers = []
-            for pkg in pkg_nodes:
-                edges = self._graph.get_edges_from(pkg["_id"], "INSTALLED_ON")
-                for e in edges:
-                    srv = self._graph.get_node(e["target"])
-                    if srv:
-                        servers.append(srv)
-            result = {"package": pkg_name, "servers": servers}
+            servers = self._queries.find_servers_with_package(inp["package_name"])
+            result = {"package": inp["package_name"], "servers": servers}
 
         elif name == "get_topology":
             result = self._graph.get_full_topology()
 
         elif name == "find_incidents":
-            incidents = self._graph.find_nodes("Incident")
-            keyword = inp.get("keyword", "")
-            hostname = inp.get("hostname", "")
-            if keyword:
-                kw = keyword.lower()
-                incidents = [i for i in incidents if kw in json.dumps(i, default=str).lower()]
-            if hostname:
-                # hostname에 AFFECTED edge가 있는 incident만
-                filtered = []
-                for inc in incidents:
-                    edges = self._graph.get_edges_from(inc["_id"], "AFFECTED")
-                    if any(f"server:{hostname}" == e["target"] for e in edges):
-                        filtered.append(inc)
-                incidents = filtered
-            result = {"incidents": incidents}
+            result = {
+                "incidents": self._queries.search_incidents(
+                    keyword=inp.get("keyword"),
+                    hostname=inp.get("hostname"),
+                )
+            }
+
+        elif name == "get_dependency_chain":
+            result = self._queries.get_dependency_chain(inp["hostname"])
+
+        elif name == "find_applicable_servers":
+            skill_id = inp["skill_id"]
+            skill = self._skills.get(skill_id)
+            if not skill:
+                result = {"error": f"Skill '{skill_id}' not found"}
+            else:
+                servers = self._resolver.find_applicable_servers(skill)
+                groups = self._resolver.suggest_execution_order(skill, servers)
+                result = {
+                    "skill": skill_id,
+                    "servers": servers,
+                    "execution_groups": [[s["hostname"] for s in g] for g in groups],
+                }
 
         elif name == "propose_plan":
             caution_notes = []
@@ -151,8 +188,14 @@ class SREAgentBrain:
                     for note in srv["caution_notes"]:
                         caution_notes.append(f"[{h}] {note}")
 
+            plan_id = submit_plan(
+                skill_id=inp["skill_id"],
+                target_servers=inp["target_servers"],
+                requested_by="ai-agent",
+            )
+
             plan = ExecutionPlan(
-                plan_id=f"PLAN-{uuid.uuid4().hex[:8]}",
+                plan_id=plan_id,
                 skill_id=inp["skill_id"],
                 target_servers=inp["target_servers"],
                 estimated_impact=f"{len(inp['target_servers'])}대 서버",
@@ -167,6 +210,7 @@ class SREAgentBrain:
 
     async def chat(self, user_message: str) -> str:
         self._history.append({"role": "user", "content": user_message})
+        self._trim_history()
 
         skills_summary = "\n".join(
             f"- {s.id}: {s.name} (trigger: {s.trigger}, risk: {s.risk})"
@@ -176,7 +220,7 @@ class SREAgentBrain:
 
         messages = list(self._history)
 
-        for _ in range(10):  # max tool use rounds
+        for _ in range(10):
             response = await self._client.messages.create(
                 model=settings.anthropic_model,
                 max_tokens=4096,
@@ -195,7 +239,10 @@ class SREAgentBrain:
                 tool_results = []
                 for block in response.content:
                     if block.type == "tool_use":
-                        logger.info("tool_call", extra={"tool": block.name, "input": block.input})
+                        logger.info(
+                            "tool_call",
+                            extra={"tool": block.name, "input": block.input},
+                        )
                         result = await self._execute_tool(block.name, block.input)
                         tool_results.append(
                             {

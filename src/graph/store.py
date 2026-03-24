@@ -32,7 +32,11 @@ class GraphStore:
         """앱 시작 시 SQLite에서 전체 그래프를 NetworkX로 로드."""
         nodes = self._db.execute("SELECT id, type, properties FROM nodes").fetchall()
         for row in nodes:
-            props = json.loads(row["properties"])
+            try:
+                props = json.loads(row["properties"])
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("corrupt_node_properties", extra={"id": row["id"]})
+                props = {}
             props["_type"] = row["type"]
             self._graph.add_node(row["id"], **props)
 
@@ -40,7 +44,14 @@ class GraphStore:
             "SELECT source_id, target_id, type, properties FROM edges"
         ).fetchall()
         for row in edges:
-            props = json.loads(row["properties"])
+            try:
+                props = json.loads(row["properties"])
+            except (json.JSONDecodeError, TypeError):
+                logger.warning(
+                    "corrupt_edge_properties",
+                    extra={"source": row["source_id"], "target": row["target_id"]},
+                )
+                props = {}
             props["_type"] = row["type"]
             self._graph.add_edge(row["source_id"], row["target_id"], **props)
 

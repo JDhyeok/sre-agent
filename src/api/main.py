@@ -8,45 +8,58 @@ FastAPI 메인 앱 — 단일 프로세스, SQLite, Background Correlator.
 from __future__ import annotations
 
 import asyncio
-import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import structlog
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from src.agent.approval import (
+    approve_plan,
+    get_pending_plans,
+    get_plan,
+    reject_plan,
+)
 from src.agent.brain import SREAgentBrain
 from src.config import settings
 from src.correlator.receiver import enqueue_event, run_correlator_loop
-from src.database import init_all_databases
+from src.database import close_all, init_all_databases
+from src.graph.queries import GraphQueries
 from src.graph.store import GraphStore
+from src.logging_config import setup_logging
 from src.skills.loader import load_all_skills
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 graph: GraphStore | None = None
+queries: GraphQueries | None = None
 agent: SREAgentBrain | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global graph, agent
+    global graph, queries, agent
 
-    # Startup
+    setup_logging()
     init_all_databases()
     graph = GraphStore()
+    queries = GraphQueries(graph)
     agent = SREAgentBrain(graph)
 
     skills = load_all_skills()
-    logger.info("app_started", extra={"skills": len(skills), "nodes": graph.nx.number_of_nodes()})
+    logger.info(
+        "app_started",
+        skills=len(skills),
+        nodes=graph.nx.number_of_nodes(),
+    )
 
-    # Background: Correlator 루프 시작
     correlator_task = asyncio.create_task(run_correlator_loop(graph))
 
     yield
 
-    # Shutdown
     correlator_task.cancel()
+    close_all()
 
 
 app = FastAPI(
@@ -98,20 +111,20 @@ async def list_servers():
 
 @app.get("/api/servers/{hostname}")
 async def get_server(hostname: str):
-    node_id = f"server:{hostname}"
-    server = graph.get_node(node_id)
-    if not server:
-        return {"error": "Not found"}, 404
-
-    edges = graph.get_edges_to(node_id, "HOSTED_ON")
-    services = [graph.get_node(e["source"]) for e in edges]
-
-    return {"server": server, "services": services}
+    result = queries.get_server_full(hostname)
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Server '{hostname}' not found")
+    return result
 
 
 @app.get("/api/servers/{hostname}/blast-radius")
 async def get_blast_radius(hostname: str):
     return graph.blast_radius(f"server:{hostname}")
+
+
+@app.get("/api/servers/{hostname}/dependencies")
+async def get_dependencies(hostname: str, max_depth: int = 5):
+    return queries.get_dependency_chain(hostname, max_depth)
 
 
 @app.get("/api/topology")
@@ -124,12 +137,71 @@ async def detect_spof(min_fan_in: int = 3):
     return {"spof": graph.find_spof(min_fan_in)}
 
 
+@app.get("/api/packages/{package_name}/servers")
+async def get_servers_by_package(package_name: str):
+    servers = queries.find_servers_with_package(package_name)
+    return {"package": package_name, "servers": servers, "count": len(servers)}
+
+
+@app.get("/api/incidents")
+async def search_incidents(keyword: str | None = None, hostname: str | None = None):
+    return {"incidents": queries.search_incidents(keyword, hostname)}
+
+
+@app.get("/api/certs/expiring")
+async def get_expiring_certs(days: int = 30):
+    return {"certs": queries.get_expiring_certs(days)}
+
+
 @app.get("/api/skills")
 async def list_skills():
     skills = load_all_skills()
     return {
         sid: {"name": s.name, "trigger": s.trigger, "risk": s.risk} for sid, s in skills.items()
     }
+
+
+# ─── 승인 워크플로우 API ──────────────────────────────────
+
+
+@app.get("/api/plans/pending")
+async def list_pending_plans():
+    plans = get_pending_plans()
+    return {"plans": plans, "count": len(plans)}
+
+
+@app.get("/api/plans/{plan_id}")
+async def get_plan_detail(plan_id: str):
+    plan = get_plan(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail=f"Plan '{plan_id}' not found")
+    return plan
+
+
+class ApprovalAction(BaseModel):
+    actor: str
+
+
+@app.post("/api/plans/{plan_id}/approve")
+async def approve(plan_id: str, action: ApprovalAction):
+    success = approve_plan(plan_id, action.actor)
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Plan '{plan_id}' is not in pending state",
+        )
+    return {"status": "approved", "plan_id": plan_id}
+
+
+@app.post("/api/plans/{plan_id}/reject")
+async def reject(plan_id: str, action: ApprovalAction):
+    success = reject_plan(plan_id, action.actor)
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Plan '{plan_id}' is not in pending state",
+        )
+    return {"status": "rejected", "plan_id": plan_id}
 
 
 # ─── WebSocket Chat ───────────────────────────────────────
@@ -151,7 +223,7 @@ async def websocket_chat(ws: WebSocket):
                 response = await chat_agent.chat(user_message)
                 await ws.send_json({"type": "message", "content": response})
             except Exception as e:
-                logger.error("chat_error", extra={"error": str(e)})
+                logger.error("chat_error", error=str(e))
                 await ws.send_json({"type": "error", "content": str(e)})
 
     except WebSocketDisconnect:

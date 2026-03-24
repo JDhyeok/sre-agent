@@ -23,7 +23,7 @@ from src.models.schemas import ConnectionEvent
 
 logger = logging.getLogger(__name__)
 
-# PID → Service 이름 캐시 (in-memory, Redis 대체)
+_PID_CACHE_MAX = 10_000
 _pid_cache: dict[str, str] = {}
 
 _KNOWN_BINARIES = {
@@ -59,6 +59,11 @@ def resolve_service_name(hostname: str, pid: int, binary: str) -> str:
 
     filename = PurePosixPath(binary).name
     name = _KNOWN_BINARIES.get(filename, filename)
+
+    if len(_pid_cache) >= _PID_CACHE_MAX:
+        to_remove = list(_pid_cache.keys())[: _PID_CACHE_MAX // 4]
+        for k in to_remove:
+            del _pid_cache[k]
 
     _pid_cache[cache_key] = name
     return name
