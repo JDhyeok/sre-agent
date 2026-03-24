@@ -1,0 +1,29 @@
+# Tetragon TracingPolicy — TCP connect/accept 이벤트를 캡처한다.
+# 각 서버에 Tetragon과 함께 배포.
+# 참고: https://tetragon.io/docs/concepts/tracing-policy/
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: network-connections
+spec:
+  kprobes:
+    # Outbound: connect() 시스콜 추적
+    - call: tcp_connect
+      syscall: false
+      args:
+        - index: 0
+          type: sock
+      selectors:
+        - matchActions:
+            - action: Post
+    # Inbound: accept() 시스콜 추적
+    - call: __sys_accept4
+      syscall: true
+      args:
+        - index: 0
+          type: int
+        - index: 1
+          type: sockaddr
+      selectors:
+        - matchActions:
+            - action: Post
