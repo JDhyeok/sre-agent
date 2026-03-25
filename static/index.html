@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SRE Agent — Dashboard</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        background: #0f1419;
+        color: #e8edf4;
+      }
+      .access-hint {
+        margin: 0;
+        padding: 0.6rem 1.5rem;
+        font-size: 0.8125rem;
+        background: #1e293b;
+        color: #94a3b8;
+        border-bottom: 1px solid #334155;
+      }
+      .access-hint code {
+        background: #0f172a;
+        padding: 0.1rem 0.35rem;
+        border-radius: 4px;
+      }
+    </style>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <p class="access-hint" role="note">
+      화면이 비면 서버(<code>make api</code>) 실행 여부를 확인하세요. macOS에서는
+      <code>localhost</code> 대신 <a href="http://127.0.0.1:8000/"><code>127.0.0.1:8000</code></a>으로
+      열어보세요.
+    </p>
+    <header class="app-header">
+      <h1>SRE Agent</h1>
+      <div id="health">…</div>
+    </header>
+
+    <div class="toolbar page-toolbar">
+      <button type="button" class="btn-secondary" id="btn-refresh">데이터 새로고침</button>
+      <label>
+        승인자 이름
+        <input type="text" id="actor" placeholder="operator" autocomplete="username" />
+      </label>
+    </div>
+
+    <main class="layout-dashboard">
+      <section class="panel full-width topology-section" aria-labelledby="topo-title">
+        <div class="topology-head">
+          <h2 id="topo-title">서비스 토폴로지 (CALLS)</h2>
+          <div class="topology-toolbar" role="toolbar" aria-label="토폴로지 보기 옵션">
+            <span class="toolbar-label">보기</span>
+            <button type="button" id="topo-view-graph" class="btn-secondary btn-small active">그래프</button>
+            <button type="button" id="topo-view-table" class="btn-secondary btn-small">표</button>
+            <span class="toolbar-sep" aria-hidden="true"></span>
+            <span class="toolbar-label">배치</span>
+            <button type="button" id="topo-layout-hier" class="btn-secondary btn-small active">계층 ↑↓</button>
+            <button type="button" id="topo-layout-physics" class="btn-secondary btn-small">힘 시뮬</button>
+            <button type="button" id="topo-fit" class="btn-secondary btn-small">맞춤</button>
+          </div>
+        </div>
+        <div id="topology-body" class="topology-body-msg hidden" aria-live="polite"></div>
+        <div id="topology-graph" class="topology-graph"></div>
+        <div id="topology-table" class="topology-table hidden"></div>
+        <p id="topology-meta" class="panel-sub topology-meta"></p>
+      </section>
+
+      <div class="layout-split">
+        <section class="panel chat-panel" aria-labelledby="chat-title">
+          <h2 id="chat-title">에이전트 채팅</h2>
+          <p id="chat-status" class="chat-status">연결 중…</p>
+          <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
+          <div class="chat-input-row">
+            <textarea
+              id="chat-input"
+              rows="2"
+              placeholder="질문을 입력하세요 (Shift+Enter 줄바꿈)"
+              autocomplete="off"
+            ></textarea>
+            <button type="button" class="btn-primary" id="btn-send">전송</button>
+          </div>
+          <p class="panel-sub" style="margin-top: 0.5rem">
+            <button type="button" class="btn-secondary btn-small" id="btn-refresh-chat">WebSocket 재연결</button>
+          </p>
+        </section>
+
+        <aside class="panel topology-legend" aria-labelledby="legend-title">
+          <h2 id="legend-title">그래프 가이드</h2>
+          <ul class="legend-list">
+            <li><span class="legend-swatch swatch-svc"></span> <code>service:*</code> 서비스 노드</li>
+            <li><span class="legend-swatch swatch-srv"></span> <code>server:*</code> 서버 노드</li>
+            <li>화살표: 호출 방향 · 라벨: 프로토콜:포트</li>
+            <li>엣지가 많으면 <strong>표</strong> 보기로 전환하거나 <strong>힘 시뮬</strong>로 분산 배치해 보세요.</li>
+          </ul>
+        </aside>
+      </div>
+
+      <section class="panel full-width" aria-labelledby="plans-title">
+        <h2 id="plans-title">승인 대기 실행 계획</h2>
+        <div id="plans">로딩 중…</div>
+      </section>
+
+      <section class="panel full-width" aria-labelledby="inc-title">
+        <h2 id="inc-title">인시던트 (온톨로지)</h2>
+        <div id="incidents">로딩 중…</div>
+      </section>
+    </main>
+
+    <footer class="footer-links">
+      <a href="/docs">OpenAPI</a>
+      ·
+      <a href="/health">Health JSON</a>
+    </footer>
+
+    <script src="/static/vendor/vis-network.min.js" defer></script>
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

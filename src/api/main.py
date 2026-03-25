@@ -8,11 +8,15 @@ FastAPI 메인 앱 — 단일 프로세스, SQLite, Background Correlator.
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import structlog
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src.agent.approval import (
@@ -23,6 +27,7 @@ from src.agent.approval import (
 )
 from src.agent.brain import SREAgentBrain
 from src.config import settings
+from src.correlator.otlp_adapter import process_otlp_logs
 from src.correlator.receiver import enqueue_event, run_correlator_loop
 from src.database import close_all, init_all_databases
 from src.graph.queries import GraphQueries
@@ -31,6 +36,8 @@ from src.logging_config import setup_logging
 from src.skills.loader import load_all_skills
 
 logger = structlog.get_logger(__name__)
+
+STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "static"
 
 graph: GraphStore | None = None
 queries: GraphQueries | None = None
@@ -48,11 +55,20 @@ async def lifespan(app: FastAPI):
     agent = SREAgentBrain(graph)
 
     skills = load_all_skills()
+    index_path = STATIC_DIR / "index.html"
     logger.info(
         "app_started",
         skills=len(skills),
         nodes=graph.nx.number_of_nodes(),
+        dashboard_static=str(STATIC_DIR),
+        dashboard_index_exists=index_path.is_file(),
     )
+    if not index_path.is_file():
+        logger.error(
+            "dashboard_missing",
+            expected_index=str(index_path),
+            hint="Run from sre-agent repo root; static/index.html must exist.",
+        )
 
     correlator_task = asyncio.create_task(run_correlator_loop(graph))
 
@@ -78,6 +94,18 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+async def dashboard():
+    """대시보드 (토폴로지 · 승인 · 채팅)."""
+    index = STATIC_DIR / "index.html"
+    if not index.is_file():
+        raise HTTPException(status_code=404, detail="Dashboard index not found")
+    return FileResponse(index, media_type="text/html")
+
+
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
 # ─── 이벤트 수신 (OTel Collector → 여기) ──────────────────
 
 
@@ -98,6 +126,29 @@ async def ingest_events_batch(events: list[IngestPayload]):
     """여러 이벤트를 한 번에 받는다."""
     ids = [enqueue_event(e.event_type, e.payload) for e in events]
     return {"status": "queued", "count": len(ids)}
+
+
+@app.post("/v1/logs")
+async def ingest_otlp_logs(request: Request):
+    """OTel Collector의 otlphttp exporter가 OTLP 포맷으로 보내는 엔드포인트."""
+    import gzip as _gzip
+
+    content_type = request.headers.get("content-type", "")
+    if "protobuf" in content_type:
+        return JSONResponse(
+            status_code=415,
+            content={"error": "Protobuf not supported. Set encoding: json in OTel config."},
+        )
+
+    body = await request.body()
+    content_encoding = request.headers.get("content-encoding", "")
+    if content_encoding == "gzip":
+        body = _gzip.decompress(body)
+
+    data = json.loads(body)
+    count = process_otlp_logs(data)
+    logger.info("otlp_logs_ingested", count=count)
+    return JSONResponse(content={"partialSuccess": {}})
 
 
 # ─── 온톨로지 조회 API ─────────────────────────────────────

@@ -1,4 +1,4 @@
-.PHONY: setup seed api test lint clean
+.PHONY: setup seed api api-ipv6 api-prod test lint clean
 
 # ─── 초기 설정 ─────────────────────────────────
 setup:
@@ -17,8 +17,13 @@ seed:
 	python -m scripts.seed_ontology
 
 # ─── 앱 실행 ──────────────────────────────────
+# 대시보드: http://127.0.0.1:8000/ (macOS에서 localhost 가 IPv6만 쓰면 연결 실패할 수 있음)
 api:
 	uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+# IPv6 localhost(::1)에서도 붙이려면 (환경에 따라 동작이 다를 수 있음)
+api-ipv6:
+	uvicorn src.api.main:app --host '::' --port 8000 --reload
 
 api-prod:
 	uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers 1

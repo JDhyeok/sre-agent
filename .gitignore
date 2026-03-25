@@ -9,3 +9,4 @@ dist/
 node_modules/
 data/
 wheels/
+bin/

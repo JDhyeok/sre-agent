@@ -1,0 +1,31 @@
+# OTel Collector — 로컬 테스트용 설정
+# Tetragon 시뮬레이터에서 OTLP HTTP로 이벤트를 받아 FastAPI로 전달
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 2s
+    send_batch_size: 10
+
+exporters:
+  otlphttp:
+    endpoint: http://localhost:8000
+    encoding: json
+    compression: none
+    tls:
+      insecure: true
+
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp, debug]
