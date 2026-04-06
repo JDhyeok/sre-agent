@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import json
 import time
+import warnings
 from pathlib import Path
 from typing import Annotated, Optional
+
+warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
 import typer
 from rich.console import Console
