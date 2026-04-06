@@ -1,0 +1,36 @@
+anthropic:
+  # base_url을 환경변수 ANTHROPIC_BASE_URL로 오버라이드 가능
+  # 사내 프록시 사용 시: export ANTHROPIC_BASE_URL="https://your-proxy.com/v1"
+  base_url: "https://api.anthropic.com"
+  model_id: "claude-sonnet-4-20250514"
+  max_tokens: 4096
+
+prometheus:
+  url: "http://localhost:9090"
+  alertmanager_url: "http://localhost:9093"
+  default_step: "60s"
+  baseline_window_hours: 24
+
+elasticsearch:
+  url: "http://localhost:9200"
+  default_index: "app-logs-*"
+  max_results: 500
+
+ssh:
+  timeout_seconds: 10
+  hosts: []
+  # 실제 SSH 대상 추가 예시:
+  # hosts:
+  #   - name: "app-server-1"
+  #     hostname: "10.0.1.10"
+  #     port: 22
+  #     username: "sre-readonly"
+  #     key_path: "~/.ssh/sre_readonly_key"
+
+mcp_servers:
+  prometheus:
+    transport: "stdio"
+  elasticsearch:
+    transport: "stdio"
+  ssh:
+    transport: "stdio"

@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.cursor/
+
+# Environment & secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Data
+data/
+*.json.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+docker-data/

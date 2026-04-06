@@ -1,0 +1,91 @@
+allowed_commands:
+  process:
+    - pattern: "ps -ef"
+      description: "List all running processes"
+    - pattern: "ps aux"
+      description: "List all processes with resource usage"
+    - pattern: "ps aux --sort=-%mem"
+      description: "List processes sorted by memory"
+    - pattern: "ps aux --sort=-%cpu"
+      description: "List processes sorted by CPU"
+    - pattern: "top -bn1"
+      description: "Single snapshot of running processes"
+
+  network:
+    - pattern: "ss -tlnp"
+      description: "List listening TCP ports"
+    - pattern: "ss -s"
+      description: "Socket statistics summary"
+    - pattern: "ss -tunap"
+      description: "All TCP/UDP connections with process info"
+    - pattern: "netstat -an"
+      description: "All network connections"
+    - pattern: "netstat -tlnp"
+      description: "Listening TCP ports"
+
+  disk:
+    - pattern: "df -h"
+      description: "Disk usage of mounted filesystems"
+    - pattern: "df -i"
+      description: "Inode usage of mounted filesystems"
+
+  memory_cpu:
+    - pattern: "free -h"
+      description: "Memory usage"
+    - pattern: "uptime"
+      description: "System uptime and load averages"
+    - pattern: "vmstat 1 3"
+      description: "Virtual memory statistics (3 samples)"
+    - pattern: "cat /proc/loadavg"
+      description: "Load averages"
+    - pattern: "cat /proc/meminfo"
+      description: "Detailed memory info"
+
+  service:
+    - pattern: "systemctl status {service}"
+      description: "Status of a systemd service"
+      params:
+        service:
+          type: "string"
+          regex: "^[a-zA-Z0-9_.-]+$"
+    - pattern: "systemctl is-active {service}"
+      description: "Check if service is active"
+      params:
+        service:
+          type: "string"
+          regex: "^[a-zA-Z0-9_.-]+$"
+    - pattern: "journalctl -u {service} --no-pager -n {lines}"
+      description: "Recent logs for a service"
+      params:
+        service:
+          type: "string"
+          regex: "^[a-zA-Z0-9_.-]+$"
+        lines:
+          type: "integer"
+          min: 1
+          max: 200
+
+  system:
+    - pattern: "uname -a"
+      description: "System information"
+    - pattern: "dmesg --time-format iso -T"
+      description: "Kernel ring buffer (recent messages)"
+    - pattern: "cat /etc/os-release"
+      description: "OS release information"
+    - pattern: "lscpu"
+      description: "CPU architecture information"
+
+blocked_chars:
+  - ";"
+  - "&&"
+  - "||"
+  - "|"
+  - ">"
+  - ">>"
+  - "<"
+  - "`"
+  - "$("
+  - "{"
+  - "}"
+  - "\\n"
+  - "\\r"
