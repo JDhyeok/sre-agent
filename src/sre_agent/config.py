@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.resources
 import os
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,11 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
+
+
+def _bundled_config_path(filename: str) -> Path:
+    """Resolve the path to a config file bundled inside the package."""
+    return Path(importlib.resources.files("sre_agent.defaults").joinpath(filename))
 
 
 class AnthropicConfig(BaseModel):
@@ -70,14 +76,19 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
 
     if config_path is None:
         candidates = [
+            Path(os.environ.get("SRE_AGENT_CONFIG", "")),
             Path("configs/settings.yaml"),
             Path("configs/settings.yml"),
-            Path(os.environ.get("SRE_AGENT_CONFIG", "")),
+            Path.home() / ".config" / "sre-agent" / "settings.yaml",
+            _bundled_config_path("settings.yaml"),
         ]
         for candidate in candidates:
-            if candidate.exists():
-                config_path = candidate
-                break
+            try:
+                if candidate.exists():
+                    config_path = candidate
+                    break
+            except (OSError, TypeError):
+                continue
 
     if config_path and Path(config_path).exists():
         with open(config_path) as f:

@@ -6,6 +6,7 @@ commands can be executed on target servers.
 
 from __future__ import annotations
 
+import importlib.resources
 import json
 import os
 import re
@@ -17,15 +18,24 @@ from fastmcp import FastMCP
 
 SSH_CONFIG_JSON = os.environ.get("SSH_CONFIG_JSON", "[]")
 SSH_TIMEOUT = int(os.environ.get("SSH_TIMEOUT", "10"))
-ALLOWLIST_PATH = os.environ.get("SSH_ALLOWLIST_PATH", "configs/ssh_allowlist.yaml")
+ALLOWLIST_PATH = os.environ.get("SSH_ALLOWLIST_PATH", "")
 
 mcp = FastMCP("SSH Diagnostic Server")
 
 BLOCKED_CHARS = [";", "&&", "||", "|", ">", ">>", "<", "`", "$(", "\\n", "\\r"]
 
 
+def _resolve_allowlist_path() -> Path:
+    if ALLOWLIST_PATH:
+        return Path(ALLOWLIST_PATH)
+    local = Path("configs/ssh_allowlist.yaml")
+    if local.exists():
+        return local
+    return Path(importlib.resources.files("sre_agent.defaults").joinpath("ssh_allowlist.yaml"))
+
+
 def _load_allowlist() -> dict:
-    path = Path(ALLOWLIST_PATH)
+    path = _resolve_allowlist_path()
     if not path.exists():
         return {"allowed_commands": {}, "blocked_chars": BLOCKED_CHARS}
     with open(path) as f:

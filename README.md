@@ -5,7 +5,7 @@ Automated Root Cause Analysis (RCA) system using [Strands Agents SDK](https://st
 ## Architecture
 
 ```
-Trigger (CLI / Slack / Alertmanager Webhook)
+Trigger (CLI / Alertmanager Webhook)
   └─→ Orchestrator Agent
         ├─→ Prometheus Agent  ──→ Prometheus MCP Server ──→ Prometheus API
         ├─→ Elasticsearch Agent ──→ Elasticsearch MCP Server ──→ Elasticsearch API
@@ -16,36 +16,72 @@ Trigger (CLI / Slack / Alertmanager Webhook)
 
 Each specialist agent is registered as a tool via `.as_tool()`, allowing the Orchestrator's LLM to dynamically decide which agents to invoke and in what order based on the incident context.
 
-## Quick Start
+## Installation
 
-### Installation
+### From PyPI (after publishing)
 
 ```bash
+pip install sre-agent
+```
+
+With all optional dependencies:
+
+```bash
+pip install "sre-agent[all]"
+```
+
+### From GitHub
+
+```bash
+pip install git+https://github.com/JDhyeok/sre-agent.git
+```
+
+### From source (development)
+
+```bash
+git clone https://github.com/JDhyeok/sre-agent.git
+cd sre-agent
 pip install -e ".[all,dev]"
 ```
 
-### Configuration
-
-1. Copy and edit the config:
+### Using pipx (isolated global install)
 
 ```bash
-cp configs/settings.yaml configs/settings.local.yaml
-# Edit with your Prometheus, Elasticsearch, SSH settings
+pipx install git+https://github.com/JDhyeok/sre-agent.git
 ```
 
-2. Set your API key:
+After installation, the `sre-agent` command is available globally.
+
+## Configuration
+
+1. Set your API key:
 
 ```bash
 export ANTHROPIC_API_KEY="your-api-key"
 ```
 
-### Usage
+2. (Optional) Override Anthropic endpoint for internal proxies:
 
-**CLI Analysis:**
+```bash
+export ANTHROPIC_BASE_URL="https://your-internal-proxy.example.com/v1"
+```
+
+3. (Optional) Customize data source connections by editing `configs/settings.yaml`.
+
+## Usage
+
+**Interactive Chat:**
+
+```bash
+sre-agent chat
+```
+
+**Incident Analysis (with interactive Q&A):**
 
 ```bash
 sre-agent analyze "API server returning 5xx errors, service: payment-api"
 sre-agent analyze --alert-json alert_payload.json "High error rate detected"
+sre-agent analyze --no-interactive "OOM killed on app-server-1"
 ```
 
 **Configuration Check:**
@@ -54,19 +90,10 @@ sre-agent analyze --alert-json alert_payload.json "High error rate detected"
 sre-agent check
 ```
 
-**Slack Bot:**
-
-```bash
-export SLACK_BOT_TOKEN="xoxb-..."
-export SLACK_APP_TOKEN="xapp-..."
-sre-agent slack
-```
-
 **Alertmanager Webhook:**
 
 ```bash
 sre-agent webhook --port 8080
-# POST http://localhost:8080/webhook/alertmanager
 ```
 
 **Knowledge Base:**
@@ -115,7 +142,6 @@ src/sre_agent/
 ├── prompts/                # System prompts for each agent
 ├── schemas/                # Pydantic models for structured output
 └── integrations/           # External integrations
-    ├── slack.py            # Slack Bot (Bolt SDK)
     ├── webhook.py          # Alertmanager webhook (FastAPI)
     ├── knowledge_base.py   # Incident KB storage/search
     └── otel.py             # OpenTelemetry tracing
