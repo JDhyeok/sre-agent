@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Callable
+
 from strands import Agent
 
 from sre_agent.agents.data_collector import create_data_collector_agent
@@ -13,12 +15,18 @@ from sre_agent.model import create_model
 from sre_agent.prompts.orchestrator import build_system_prompt
 
 
-def create_orchestrator(settings: Settings) -> Agent:
+def create_orchestrator(
+    settings: Settings,
+    *,
+    callback_handler: Callable[..., Any] | None = None,
+    tool_callback_handler: Callable[..., Any] | None = None,
+) -> Agent:
     """Create the orchestrator agent with all specialist agents as tools.
 
-    The system prompt is dynamically built with environment context (configured
-    hosts, URLs, etc.) so the orchestrator knows what resources are available
-    and can ask the user targeted questions about missing information.
+    Args:
+        settings: Application settings.
+        callback_handler: Callback for the orchestrator itself (shows agent-level tool calls).
+        tool_callback_handler: Callback forwarded to sub-agents (shows MCP-level tool calls).
     """
     model = create_model(settings.anthropic)
 
@@ -32,10 +40,12 @@ def create_orchestrator(settings: Settings) -> Agent:
         ssh_hosts=[h.model_dump() for h in settings.ssh.hosts],
     )
 
-    data_collector_agent = create_data_collector_agent(settings)
-    ssh_agent = create_ssh_agent(settings)
-    rca_agent = create_rca_agent(settings)
-    solution_agent = create_solution_agent(settings)
+    data_collector_agent = create_data_collector_agent(
+        settings, callback_handler=tool_callback_handler,
+    )
+    ssh_agent = create_ssh_agent(settings, callback_handler=tool_callback_handler)
+    rca_agent = create_rca_agent(settings, callback_handler=tool_callback_handler)
+    solution_agent = create_solution_agent(settings, callback_handler=tool_callback_handler)
 
     tools = [
         data_collector_agent.as_tool(
@@ -86,4 +96,5 @@ def create_orchestrator(settings: Settings) -> Agent:
         model=model,
         system_prompt=system_prompt,
         tools=tools,
+        callback_handler=callback_handler,
     )

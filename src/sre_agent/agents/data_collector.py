@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any, Callable
 
 from mcp import StdioServerParameters, stdio_client
 from strands import Agent
@@ -24,8 +25,17 @@ _PROMETHEUS_SCRIPT = str(_MCP_DIR / "prometheus_server.py")
 _ELASTICSEARCH_SCRIPT = str(_MCP_DIR / "elasticsearch_server.py")
 _CMDB_SCRIPT = str(_MCP_DIR / "servicenow_cmdb_server.py")
 
+_FASTMCP_QUIET: dict[str, str] = {
+    "FASTMCP_SHOW_SERVER_BANNER": "false",
+    "FASTMCP_LOG_ENABLED": "false",
+}
 
-def create_data_collector_agent(settings: Settings) -> Agent:
+
+def create_data_collector_agent(
+    settings: Settings,
+    *,
+    callback_handler: Callable[..., Any] | None = None,
+) -> Agent:
     """Create a Data Collector agent backed by Prometheus, ES, and CMDB MCP servers."""
     model = create_model(settings.anthropic)
 
@@ -34,6 +44,7 @@ def create_data_collector_agent(settings: Settings) -> Agent:
             command=sys.executable,
             args=[_PROMETHEUS_SCRIPT],
             env={
+                **_FASTMCP_QUIET,
                 "PROMETHEUS_URL": settings.prometheus.url,
                 "ALERTMANAGER_URL": settings.prometheus.alertmanager_url,
                 "PROMETHEUS_BASELINE_HOURS": str(settings.prometheus.baseline_window_hours),
@@ -46,6 +57,7 @@ def create_data_collector_agent(settings: Settings) -> Agent:
             command=sys.executable,
             args=[_ELASTICSEARCH_SCRIPT],
             env={
+                **_FASTMCP_QUIET,
                 "ELASTICSEARCH_URL": settings.elasticsearch.url,
                 "ELASTICSEARCH_DEFAULT_INDEX": settings.elasticsearch.default_index,
                 "ELASTICSEARCH_MAX_RESULTS": str(settings.elasticsearch.max_results),
@@ -53,7 +65,7 @@ def create_data_collector_agent(settings: Settings) -> Agent:
         )
     ))
 
-    cmdb_env: dict[str, str] = {}
+    cmdb_env: dict[str, str] = {**_FASTMCP_QUIET}
     if settings.servicenow.instance_url:
         cmdb_env["SERVICENOW_INSTANCE_URL"] = settings.servicenow.instance_url
 
@@ -69,4 +81,5 @@ def create_data_collector_agent(settings: Settings) -> Agent:
         model=model,
         system_prompt=SYSTEM_PROMPT,
         tools=[prometheus_mcp, elasticsearch_mcp, cmdb_mcp],
+        callback_handler=callback_handler,
     )

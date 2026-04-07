@@ -11,6 +11,9 @@ import yaml
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
+USER_CONFIG_DIR: Path = Path.home() / ".config" / "sre-agent"
+USER_CONFIG_PATH: Path = USER_CONFIG_DIR / "settings.yaml"
+
 
 def _bundled_config_path(filename: str) -> Path:
     """Resolve the path to a config file bundled inside the package."""
@@ -81,22 +84,25 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
     data: dict[str, Any] = {}
 
     if config_path is None:
-        candidates = [
-            Path(os.environ.get("SRE_AGENT_CONFIG", "")),
+        env_config = os.environ.get("SRE_AGENT_CONFIG", "")
+        candidates: list[Path] = []
+        if env_config:
+            candidates.append(Path(env_config))
+        candidates.extend([
             Path("configs/settings.yaml"),
             Path("configs/settings.yml"),
             Path.home() / ".config" / "sre-agent" / "settings.yaml",
             _bundled_config_path("settings.yaml"),
-        ]
+        ])
         for candidate in candidates:
             try:
-                if candidate.exists():
+                if candidate.is_file():
                     config_path = candidate
                     break
             except (OSError, TypeError):
                 continue
 
-    if config_path and Path(config_path).exists():
+    if config_path and Path(config_path).is_file():
         with open(config_path) as f:
             data = yaml.safe_load(f) or {}
 

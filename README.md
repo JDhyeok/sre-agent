@@ -17,6 +17,15 @@ Trigger (CLI / Alertmanager Webhook)
 
 Each specialist agent is registered as a tool via `.as_tool()`. The **Data Collector** agent unifies metrics, logs, and topology into a single top-down investigation (L1 Symptom → L6 Platform). The **RCA Agent** applies a 5-Phase Framework: Triage → Timeline → Correlation → Root Cause (5 Whys) → Verification.
 
+## Quick Start
+
+```bash
+pip install sre-agent
+sre-agent
+```
+
+On first run, an interactive setup wizard creates `~/.config/sre-agent/settings.yaml` and prompts for your API key. After setup, just run `sre-agent` to start.
+
 ## Installation
 
 ### From PyPI (after publishing)
@@ -25,7 +34,7 @@ Each specialist agent is registered as a tool via `.as_tool()`. The **Data Colle
 pip install sre-agent
 ```
 
-With all optional dependencies:
+With all optional dependencies (SSH, webhook):
 
 ```bash
 pip install "sre-agent[all]"
@@ -55,27 +64,48 @@ After installation, the `sre-agent` command is available globally.
 
 ## Configuration
 
-1. Set your API key:
+Configuration is stored in `~/.config/sre-agent/settings.yaml` (created automatically on first run).
+
+### API Key
+
+Set via environment variable or the config `.env` file:
 
 ```bash
+# Option 1: Environment variable
 export ANTHROPIC_API_KEY="your-api-key"
+
+# Option 2: Config file (created by setup wizard)
+echo 'ANTHROPIC_API_KEY=your-api-key' > ~/.config/sre-agent/.env
 ```
 
-2. (Optional) Override Anthropic endpoint for internal proxies:
+### Custom API Endpoint
+
+For internal Anthropic proxies, set in `~/.config/sre-agent/settings.yaml`:
+
+```yaml
+anthropic:
+  base_url: "https://your-internal-proxy.example.com/v1"
+```
+
+Or via environment variable:
 
 ```bash
 export ANTHROPIC_BASE_URL="https://your-internal-proxy.example.com/v1"
 ```
 
-3. (Optional) Customize data source connections by editing `configs/settings.yaml`.
+### Data Sources
+
+Edit `~/.config/sre-agent/settings.yaml` to configure Prometheus, Elasticsearch, SSH hosts, and ServiceNow CMDB connections.
 
 ## Usage
 
-**Interactive Chat:**
+**Interactive Mode (default):**
 
 ```bash
-sre-agent chat
+sre-agent
 ```
+
+Type your incident description at the `>` prompt. Use `/help` for commands, `Ctrl+C` twice to exit.
 
 **Incident Analysis (with interactive Q&A):**
 
