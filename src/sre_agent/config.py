@@ -27,6 +27,16 @@ class AnthropicConfig(BaseModel):
     max_tokens: int = 4096
 
 
+class AgentTokenLimits(BaseModel):
+    """Per-agent max_tokens overrides. Falls back to anthropic.max_tokens if 0."""
+
+    orchestrator: int = 8192
+    data_collector: int = 4096
+    ssh: int = 2048
+    rca: int = 8192
+    solution: int = 4096
+
+
 class PrometheusConfig(BaseModel):
     url: str = "http://localhost:9090"
     alertmanager_url: str = "http://localhost:9093"
@@ -70,6 +80,7 @@ class MCPServersConfig(BaseModel):
 
 class Settings(BaseSettings):
     anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
+    agent_tokens: AgentTokenLimits = Field(default_factory=AgentTokenLimits)
     prometheus: PrometheusConfig = Field(default_factory=PrometheusConfig)
     elasticsearch: ElasticsearchConfig = Field(default_factory=ElasticsearchConfig)
     ssh: SSHConfig = Field(default_factory=SSHConfig)

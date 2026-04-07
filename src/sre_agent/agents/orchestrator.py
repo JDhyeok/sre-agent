@@ -28,7 +28,7 @@ def create_orchestrator(
         callback_handler: Callback for the orchestrator itself (shows agent-level tool calls).
         tool_callback_handler: Callback forwarded to sub-agents (shows MCP-level tool calls).
     """
-    model = create_model(settings.anthropic)
+    model = create_model(settings.anthropic, max_tokens=settings.agent_tokens.orchestrator)
 
     system_prompt = build_system_prompt(
         prometheus_url=settings.prometheus.url,

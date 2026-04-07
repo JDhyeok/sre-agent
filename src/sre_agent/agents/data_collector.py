@@ -37,7 +37,7 @@ def create_data_collector_agent(
     callback_handler: Callable[..., Any] | None = None,
 ) -> Agent:
     """Create a Data Collector agent backed by Prometheus, ES, and CMDB MCP servers."""
-    model = create_model(settings.anthropic)
+    model = create_model(settings.anthropic, max_tokens=settings.agent_tokens.data_collector)
 
     prometheus_mcp = MCPClient(lambda: stdio_client(
         StdioServerParameters(

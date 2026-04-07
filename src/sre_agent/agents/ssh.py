@@ -32,7 +32,7 @@ def create_ssh_agent(
     callback_handler: Callable[..., Any] | None = None,
 ) -> Agent:
     """Create an SSH agent backed by the SSH MCP server."""
-    model = create_model(settings.anthropic)
+    model = create_model(settings.anthropic, max_tokens=settings.agent_tokens.ssh)
 
     hosts_json = json.dumps([h.model_dump() for h in settings.ssh.hosts])
 

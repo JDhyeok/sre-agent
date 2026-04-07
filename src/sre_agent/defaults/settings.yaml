@@ -5,6 +5,14 @@ anthropic:
   model_id: "claude-sonnet-4-20250514"
   max_tokens: 4096
 
+# 에이전트별 max_tokens 설정 (0이면 anthropic.max_tokens 사용)
+agent_tokens:
+  orchestrator: 8192    # 최종 리포트 종합 — 긴 출력 필요
+  data_collector: 4096  # 도구 호출 위주 — 기본값 충분
+  ssh: 2048             # 명령어 실행/결과 전달 — 짧은 출력
+  rca: 8192             # 5-Phase 추론 — 긴 분석 출력
+  solution: 4096        # 조치 방안 제안
+
 prometheus:
   url: "http://localhost:9090"
   alertmanager_url: "http://localhost:9093"

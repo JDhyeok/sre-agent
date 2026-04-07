@@ -21,7 +21,7 @@ def create_solution_agent(
     This agent has no tools - it reasons about RCA results to produce
     actionable remediation plans. Future versions may add KB search tools.
     """
-    model = create_model(settings.anthropic)
+    model = create_model(settings.anthropic, max_tokens=settings.agent_tokens.solution)
 
     return Agent(
         model=model,

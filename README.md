@@ -5,7 +5,7 @@ Automated Root Cause Analysis (RCA) system using [Strands Agents SDK](https://st
 ## Architecture
 
 ```
-Trigger (CLI / Alertmanager Webhook)
+sre-agent (Interactive CLI)
   └─→ Orchestrator Agent
         ├─→ Data Collector Agent ──→ Prometheus MCP Server ──→ Prometheus API
         │                        ──→ Elasticsearch MCP Server ──→ Elasticsearch API
@@ -34,7 +34,7 @@ On first run, an interactive setup wizard creates `~/.config/sre-agent/settings.
 pip install sre-agent
 ```
 
-With all optional dependencies (SSH, webhook):
+With all optional dependencies (SSH):
 
 ```bash
 pip install "sre-agent[all]"
@@ -93,56 +93,66 @@ Or via environment variable:
 export ANTHROPIC_BASE_URL="https://your-internal-proxy.example.com/v1"
 ```
 
+### Per-Agent Token Limits
+
+Each agent can have its own `max_tokens` setting in `settings.yaml`:
+
+```yaml
+agent_tokens:
+  orchestrator: 8192
+  data_collector: 4096
+  ssh: 2048
+  rca: 8192       # Higher for reasoning-heavy analysis
+  solution: 4096
+```
+
 ### Data Sources
 
 Edit `~/.config/sre-agent/settings.yaml` to configure Prometheus, Elasticsearch, SSH hosts, and ServiceNow CMDB connections.
 
 ## Usage
 
-**Interactive Mode (default):**
-
 ```bash
 sre-agent
 ```
 
-Type your incident description at the `>` prompt. Use `/help` for commands, `Ctrl+C` twice to exit.
+Type your incident description at the `>` prompt. The system shows real-time progress as agents work:
 
-**Incident Analysis (with interactive Q&A):**
+```
+> API 서버 500 에러 급증, service: payment-api
 
-```bash
-sre-agent analyze "API server returning 5xx errors, service: payment-api"
-sre-agent analyze --alert-json alert_payload.json "High error rate detected"
-sre-agent analyze --no-interactive "OOM killed on app-server-1"
+  → Data Collector (3.2s)
+    ↳ query_instant
+    ↳ get_active_alerts
+  → Root Cause Analysis (18.5s)
+  → Solution (5.1s)
+
+  ## 인시던트 분석 리포트
+  ...
+                                                                        32.4s
 ```
 
-**Configuration Check:**
+### Slash Commands
 
-```bash
-sre-agent check
-```
+| Command | Description |
+|---------|-------------|
+| `/help` | Show available commands |
+| `/check` | Display current configuration |
+| `/config` | Show config file paths |
+| `/clear` | Clear screen |
+| `/quit` | Exit |
 
-**Alertmanager Webhook:**
-
-```bash
-sre-agent webhook --port 8080
-```
-
-**Knowledge Base:**
-
-```bash
-sre-agent kb-search "payment service timeout"
-sre-agent kb-list --count 10
-```
+`Ctrl+C` once cancels the current analysis. `Ctrl+C` twice exits the program.
 
 ## Agent Overview
 
-| Agent | Role | MCP Servers |
-|-------|------|-------------|
-| **Orchestrator** | Coordinates all agents, manages investigation workflow | All agents (as tools) |
-| **Data Collector** | Unified metrics + logs + topology investigation (top-down L1-L6) | Prometheus, Elasticsearch, ServiceNow CMDB |
-| **SSH** | Read-only server diagnostics (processes, network, disk, services) | SSH |
-| **RCA** | 5-Phase root cause analysis (Triage → Timeline → Correlation → Root Cause → Verification) | None (pure reasoning) |
-| **Solution** | Remediation recommendations (immediate / short-term / long-term) | None (pure reasoning) |
+| Agent | Role | MCP Servers | Default Tokens |
+|-------|------|-------------|----------------|
+| **Orchestrator** | Coordinates agents, synthesizes final Markdown report | All agents (as tools) | 8192 |
+| **Data Collector** | Unified metrics + logs + topology investigation (top-down L1→L6) | Prometheus, Elasticsearch, ServiceNow CMDB | 4096 |
+| **SSH** | Read-only server diagnostics (processes, network, disk, services) | SSH | 2048 |
+| **RCA** | 5-Phase root cause analysis (Triage → Timeline → Correlation → Root Cause → Verification) | None (pure reasoning) | 8192 |
+| **Solution** | Remediation recommendations (immediate / short-term / long-term) | None (pure reasoning) | 4096 |
 
 ## Security
 
@@ -155,9 +165,10 @@ sre-agent kb-list --count 10
 
 ```
 src/sre_agent/
-├── cli.py                  # CLI entry point (Typer)
+├── cli.py                  # Interactive CLI (Typer + Rich)
+├── callbacks.py            # Real-time agent/tool progress display
 ├── config.py               # Configuration management (Pydantic)
-├── model.py                # LLM model setup (Anthropic with custom base_url)
+├── model.py                # LLM model setup (per-agent max_tokens)
 ├── agents/                 # Specialist agents
 │   ├── orchestrator.py     # Coordinates all agents
 │   ├── data_collector.py   # Unified metrics + logs + topology
@@ -171,6 +182,7 @@ src/sre_agent/
 │   └── ssh_server.py
 ├── prompts/                # System prompts for each agent
 ├── schemas/                # Pydantic models for structured output
+├── defaults/               # Bundled default settings.yaml
 └── integrations/           # External integrations
     ├── webhook.py          # Alertmanager webhook (FastAPI)
     ├── knowledge_base.py   # Incident KB storage/search

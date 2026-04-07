@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Callable
 
 from rich.console import Console
@@ -25,9 +26,18 @@ class AgentProgressTracker:
     def __init__(self, console: Console) -> None:
         self.console = console
         self._seen: set[str] = set()
+        self._start: float = 0.0
+        self._current_agent: str = ""
 
     def reset(self) -> None:
         self._seen.clear()
+        self._start = time.time()
+        self._current_agent = ""
+
+    def _elapsed_tag(self) -> str:
+        if not self._start:
+            return ""
+        return f" [dim]({time.time() - self._start:.1f}s)[/dim]"
 
     # -- orchestrator-level: agent tool calls ----------------------------------
 
@@ -39,8 +49,11 @@ class AgentProgressTracker:
         tid = tool.get("toolUseId", "")
         if name and tid and tid not in self._seen:
             self._seen.add(tid)
+            self._current_agent = name
             label = _AGENT_LABELS.get(name, name)
-            self.console.print(f"  [bold cyan]→[/bold cyan] [bold]{label}[/bold]")
+            self.console.print(
+                f"  [bold cyan]→[/bold cyan] [bold]{label}[/bold]{self._elapsed_tag()}"
+            )
 
     # -- sub-agent-level: MCP tool calls ---------------------------------------
 

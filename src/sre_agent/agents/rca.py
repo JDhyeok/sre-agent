@@ -21,7 +21,7 @@ def create_rca_agent(
     This agent has no tools - it only analyzes data passed to it
     and produces structured root cause analysis output.
     """
-    model = create_model(settings.anthropic)
+    model = create_model(settings.anthropic, max_tokens=settings.agent_tokens.rca)
 
     return Agent(
         model=model,

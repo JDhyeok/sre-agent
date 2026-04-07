@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import time
 import warnings
 from pathlib import Path
@@ -25,24 +24,8 @@ __version__ = "0.1.0"
 app = typer.Typer(
     name="sre-agent",
     help="SRE Multi-Agent System for automated Root Cause Analysis",
-    invoke_without_command=True,
 )
 console = Console()
-
-_ANALYSIS_DONE_MARKERS = [
-    "## RCA",
-    "## Root Cause",
-    "immediate_actions",
-    "## Solution",
-    "## 조치",
-    "## 근본 원인",
-    "## 분석 완료",
-    "Analysis Complete",
-]
-
-
-def _looks_like_final_report(text: str) -> bool:
-    return any(marker.lower() in text.lower() for marker in _ANALYSIS_DONE_MARKERS)
 
 
 def _print_response(text: str) -> None:
@@ -52,8 +35,42 @@ def _print_response(text: str) -> None:
 
 def _print_elapsed(seconds: float) -> None:
     """Print elapsed time right-aligned at the bottom of the terminal width."""
-    label = f"{seconds:.1f}s"
-    console.print(Text(label, style="dim"), justify="right")
+    console.print(Text(f"{seconds:.1f}s", style="dim"), justify="right")
+
+
+# ---------------------------------------------------------------------------
+# Error hints
+# ---------------------------------------------------------------------------
+
+_ERROR_HINTS: list[tuple[str, str]] = [
+    ("Could not resolve authentication", "ANTHROPIC_API_KEY가 설정되지 않았거나 만료되었습니다.\n  → export ANTHROPIC_API_KEY=\"your-key\""),
+    ("api_key", "API key 관련 오류입니다.\n  → export ANTHROPIC_API_KEY=\"your-key\""),
+    ("Connection refused", "데이터 소스에 연결할 수 없습니다.\n  → /check 로 연결 설정을 확인하세요."),
+    ("Connection error", "네트워크 연결 오류입니다.\n  → 대상 서버가 실행 중인지 확인하세요."),
+    ("timed out", "요청 시간이 초과되었습니다.\n  → 데이터 소스 응답 상태를 확인하세요."),
+    ("rate limit", "API 호출 한도를 초과했습니다.\n  → 잠시 후 다시 시도하세요."),
+    ("401", "인증 실패입니다. API key를 확인하세요."),
+    ("403", "권한이 없습니다. API key 권한을 확인하세요."),
+    ("404", "요청한 리소스를 찾을 수 없습니다."),
+    ("500", "서버 내부 오류입니다. 잠시 후 다시 시도하세요."),
+    ("MCP", "MCP 서버 통신 오류입니다.\n  → MCP 서버 프로세스 상태를 확인하세요."),
+]
+
+
+def _print_error(exc: Exception) -> None:
+    """Print error with actionable hint if a known pattern matches."""
+    msg = str(exc)
+    console.print()
+    console.print(f"  [bold red]Error:[/bold red] {msg}")
+
+    err_lower = msg.lower()
+    for pattern, hint in _ERROR_HINTS:
+        if pattern.lower() in err_lower:
+            for line in hint.split("\n"):
+                console.print(f"  [dim]{line}[/dim]")
+            break
+
+    console.print()
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +82,13 @@ anthropic:
   base_url: "{base_url}"
   model_id: "{model_id}"
   max_tokens: 4096
+
+agent_tokens:
+  orchestrator: 8192
+  data_collector: 4096
+  ssh: 2048
+  rca: 8192
+  solution: 4096
 
 prometheus:
   url: "http://localhost:9090"
@@ -287,12 +311,11 @@ def _read_input() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Main interactive mode
+# Main entry point — interactive mode only
 # ---------------------------------------------------------------------------
 
 @app.callback(invoke_without_command=True)
 def main(
-    ctx: typer.Context,
     config: Annotated[
         Optional[Path],
         typer.Option("--config", "-c", help="Path to settings YAML config"),
@@ -306,9 +329,6 @@ def main(
     if version:
         console.print(f"sre-agent v{__version__}")
         raise typer.Exit()
-
-    if ctx.invoked_subcommand is not None:
-        return
 
     _load_env_file()
 
@@ -333,13 +353,13 @@ def main(
 
     tracker = AgentProgressTracker(console)
 
-    console.print("[dim]  Initializing agents...[/dim]", end="")
-    orchestrator = create_orchestrator(
-        settings,
-        callback_handler=tracker.get_orchestrator_handler(),
-        tool_callback_handler=tracker.get_tool_handler(),
-    )
-    console.print("\r[dim]  Agents ready.          [/dim]")
+    with console.status("[dim]  Initializing agents & MCP servers...[/dim]", spinner="dots"):
+        orchestrator = create_orchestrator(
+            settings,
+            callback_handler=tracker.get_orchestrator_handler(),
+            tool_callback_handler=tracker.get_tool_handler(),
+        )
+    console.print("[dim]  Agents ready.[/dim]")
     console.print()
 
     while True:
@@ -361,15 +381,23 @@ def main(
         try:
             response = orchestrator(user_input)
         except KeyboardInterrupt:
+            elapsed = time.time() - start
             global _last_interrupt
             _last_interrupt = time.time()
-            console.print("\n[dim]  Interrupted. Press Ctrl+C again to exit.[/dim]")
+            console.print()
+            console.print(
+                f"  [yellow]Interrupted[/yellow] [dim]({elapsed:.1f}s elapsed). "
+                f"Press Ctrl+C again to exit.[/dim]"
+            )
+            try:
+                orchestrator.messages.clear()
+            except Exception:
+                pass
+            console.print("[dim]  Context cleared — next message starts a fresh conversation.[/dim]")
             console.print()
             continue
         except Exception as e:
-            console.print()
-            console.print(f"[bold red]  Error:[/bold red] {e}")
-            console.print()
+            _print_error(e)
             continue
         elapsed = time.time() - start
 
@@ -377,193 +405,6 @@ def main(
         _print_response(str(response))
         _print_elapsed(elapsed)
         console.print()
-
-
-# ---------------------------------------------------------------------------
-# Subcommands
-# ---------------------------------------------------------------------------
-
-@app.command()
-def analyze(
-    incident: Annotated[
-        str,
-        typer.Argument(help="Incident description or context for analysis"),
-    ],
-    alert_json: Annotated[
-        Optional[Path],
-        typer.Option("--alert-json", "-a", help="Path to Alertmanager JSON payload"),
-    ] = None,
-    config: Annotated[
-        Optional[Path],
-        typer.Option("--config", "-c", help="Path to settings YAML config"),
-    ] = None,
-    no_interactive: Annotated[
-        bool,
-        typer.Option("--no-interactive", help="Skip interactive Q&A, analyze directly"),
-    ] = False,
-) -> None:
-    """Analyze an incident using the multi-agent SRE system."""
-    _load_env_file()
-    settings = load_settings(config)
-
-    incident_context = incident
-    if alert_json and alert_json.exists():
-        with open(alert_json) as f:
-            alert_data = json.load(f)
-        incident_context += f"\n\nAlertmanager Payload:\n{json.dumps(alert_data, indent=2)}"
-
-    if not settings.anthropic.api_key:
-        console.print("[bold red]  Error:[/bold red] ANTHROPIC_API_KEY is not set.")
-        console.print("[dim]  Run: export ANTHROPIC_API_KEY=\"your-key\"[/dim]")
-        raise typer.Exit(1)
-
-    console.print()
-    console.print(f"[bold red]  Incident:[/bold red] {incident_context}")
-    console.print("[dim]  Initializing agents...[/dim]")
-    console.print()
-
-    from sre_agent.agents.orchestrator import create_orchestrator
-
-    orchestrator = create_orchestrator(settings)
-
-    if no_interactive:
-        start = time.time()
-        response = orchestrator(
-            f"Investigate the following incident and produce a complete RCA report. "
-            f"Do NOT ask questions - use your best judgment with available info:\n\n{incident_context}"
-        )
-        elapsed = time.time() - start
-        _print_response(str(response))
-        _print_elapsed(elapsed)
-    else:
-        _run_interactive_analysis(orchestrator, incident_context)
-
-
-def _run_interactive_analysis(orchestrator, initial_message: str) -> None:
-    start = time.time()
-    turn = 0
-    max_turns = 10
-
-    response = orchestrator(initial_message)
-    response_text = str(response)
-    turn += 1
-
-    while turn < max_turns:
-        console.print()
-        _print_response(response_text)
-
-        if _looks_like_final_report(response_text):
-            break
-
-        console.print()
-        user_input = _read_input()
-
-        if not user_input.strip():
-            user_input = "제공된 정보로 분석을 진행해주세요."
-
-        response = orchestrator(user_input)
-        response_text = str(response)
-        turn += 1
-
-    elapsed = time.time() - start
-    _print_elapsed(elapsed)
-    console.print()
-
-    if not _looks_like_final_report(response_text):
-        _print_response(response_text)
-
-
-@app.command()
-def check(
-    config: Annotated[
-        Optional[Path],
-        typer.Option("--config", "-c", help="Path to settings YAML config"),
-    ] = None,
-) -> None:
-    """Validate configuration and check connectivity to data sources."""
-    _load_env_file()
-    settings = load_settings(config)
-    _print_check(settings)
-
-
-@app.command()
-def webhook(
-    host: Annotated[str, typer.Option("--host", "-h", help="Host to bind to")] = "0.0.0.0",
-    port: Annotated[int, typer.Option("--port", "-p", help="Port to bind to")] = 8080,
-    config: Annotated[
-        Optional[Path],
-        typer.Option("--config", "-c", help="Path to settings YAML config"),
-    ] = None,
-) -> None:
-    """Start the Alertmanager webhook server."""
-    try:
-        import uvicorn
-    except ImportError:
-        console.print("[red]  Webhook requires uvicorn. Install with: pip install sre-agent[webhook][/red]")
-        raise typer.Exit(1)
-
-    _load_env_file()
-    from sre_agent.integrations.webhook import create_webhook_app
-
-    console.print()
-    console.print("[bold red]  SRE Agent Webhook Server[/bold red]")
-    console.print(f"[dim]  Listening on {host}:{port}[/dim]")
-    console.print("[dim]  POST /webhook/alertmanager · GET /health[/dim]")
-    console.print()
-
-    webhook_app = create_webhook_app()
-    uvicorn.run(webhook_app, host=host, port=port)
-
-
-@app.command()
-def kb_search(
-    query: Annotated[str, typer.Argument(help="Search query for past incidents")],
-    top_k: Annotated[int, typer.Option("--top", "-k", help="Number of results")] = 5,
-) -> None:
-    """Search the incident knowledge base for similar past incidents."""
-    from sre_agent.integrations.knowledge_base import IncidentKB
-
-    kb = IncidentKB()
-    results = kb.search(query, top_k=top_k)
-
-    if not results:
-        console.print("[dim]  No matching incidents found.[/dim]")
-        return
-
-    console.print()
-    console.print(f"[bold]  {len(results)} similar incidents[/bold]")
-    console.print()
-    for i, inc in enumerate(results, 1):
-        summary = inc.get("incident_summary", inc.get("incident_context", ""))
-        console.print(f"  [bold]{i}.[/bold] {inc.get('id', 'unknown')} [dim]{inc.get('stored_at', '')}[/dim]")
-        console.print(f"     {summary[:200]}")
-        if inc.get("primary_root_cause"):
-            console.print(f"     [dim]Root Cause: {inc['primary_root_cause'][:200]}[/dim]")
-        console.print()
-
-
-@app.command()
-def kb_list(
-    count: Annotated[int, typer.Option("--count", "-n", help="Number of recent incidents")] = 10,
-) -> None:
-    """List recent incidents from the knowledge base."""
-    from sre_agent.integrations.knowledge_base import IncidentKB
-
-    kb = IncidentKB()
-    results = kb.list_recent(n=count)
-
-    if not results:
-        console.print("[dim]  No incidents in knowledge base.[/dim]")
-        return
-
-    console.print()
-    console.print(f"[bold]  Recent {len(results)} incidents[/bold]")
-    console.print()
-    for inc in results:
-        inc_id = inc.get("id", "unknown")
-        stored = inc.get("stored_at", "")
-        summary = inc.get("incident_summary", inc.get("incident_context", ""))[:120]
-        console.print(f"  {inc_id} [dim]{stored}[/dim] {summary}")
 
 
 if __name__ == "__main__":
