@@ -380,6 +380,7 @@ def main(
         start = time.time()
         try:
             response = orchestrator(user_input)
+            tracker.finish()
         except KeyboardInterrupt:
             elapsed = time.time() - start
             global _last_interrupt

@@ -1,0 +1,84 @@
+groups:
+  - name: targets
+    rules:
+      - alert: TargetDown
+        expr: up == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }}/{{ $labels.instance }} is down"
+          description: "Scrape target has been unreachable for 30 seconds."
+
+  - name: host
+    rules:
+      - alert: HostHighCpuUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host CPU > 80% on {{ $labels.instance }}"
+          description: "CPU usage has been above 80% for 2 minutes."
+
+      - alert: HostHighMemoryUsage
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 85
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host memory > 85% on {{ $labels.instance }}"
+          description: "Memory usage has been above 85% for 2 minutes."
+
+      - alert: HostDiskAlmostFull
+        expr: (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk > 90% on {{ $labels.instance }}:{{ $labels.mountpoint }}"
+
+  - name: containers
+    rules:
+      - alert: ContainerHighCpu
+        expr: sum by(name) (rate(container_cpu_usage_seconds_total{name=~"sre-.+"}[5m])) * 100 > 80
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} CPU > 80%"
+
+      - alert: ContainerHighMemory
+        expr: container_memory_usage_bytes{name=~"sre-.+"} / container_spec_memory_limit_bytes{name=~"sre-.+"} * 100 > 85
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} memory > 85% of limit"
+
+      - alert: ContainerRestarting
+        expr: increase(container_restart_count{name=~"sre-.+"}[15m]) > 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} restarted >3 times in 15 min"
+
+  - name: redis
+    rules:
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 15s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis instance is down"
+          description: "Redis exporter cannot connect to Redis."
+
+      - alert: RedisHighMemory
+        expr: redis_memory_used_bytes / redis_memory_max_bytes * 100 > 80
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis memory usage > 80%"

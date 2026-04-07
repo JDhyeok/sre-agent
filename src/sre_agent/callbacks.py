@@ -18,26 +18,43 @@ _AGENT_LABELS: dict[str, str] = {
 class AgentProgressTracker:
     """Tracks and displays agent/tool execution progress to the console.
 
-    Creates two callback functions:
-    - ``orchestrator_callback``: shows which agent tools the orchestrator invokes
-    - ``tool_callback``: shows which MCP tools sub-agents invoke (Prometheus, ES, …)
+    Displays start → tool calls → completion for each sub-agent:
+
+        → Data Collector
+          ↳ query_instant
+          ↳ get_active_alerts
+        ✓ Data Collector (12.3s)
+        → Root Cause Analysis
+        ✓ Root Cause Analysis (8.1s)
     """
 
     def __init__(self, console: Console) -> None:
         self.console = console
         self._seen: set[str] = set()
-        self._start: float = 0.0
+        self._global_start: float = 0.0
         self._current_agent: str = ""
+        self._agent_start: float = 0.0
 
     def reset(self) -> None:
         self._seen.clear()
-        self._start = time.time()
+        self._global_start = time.time()
+        self._current_agent = ""
+        self._agent_start = 0.0
+
+    def _close_current_agent(self) -> None:
+        """Print completion marker for the currently running agent."""
+        if not self._current_agent:
+            return
+        elapsed = time.time() - self._agent_start
+        label = _AGENT_LABELS.get(self._current_agent, self._current_agent)
+        self.console.print(
+            f"  [bold green]✓[/bold green] [bold]{label}[/bold] [dim]({elapsed:.1f}s)[/dim]"
+        )
         self._current_agent = ""
 
-    def _elapsed_tag(self) -> str:
-        if not self._start:
-            return ""
-        return f" [dim]({time.time() - self._start:.1f}s)[/dim]"
+    def finish(self) -> None:
+        """Close the last agent's progress line. Call after orchestrator returns."""
+        self._close_current_agent()
 
     # -- orchestrator-level: agent tool calls ----------------------------------
 
@@ -49,10 +66,12 @@ class AgentProgressTracker:
         tid = tool.get("toolUseId", "")
         if name and tid and tid not in self._seen:
             self._seen.add(tid)
+            self._close_current_agent()
             self._current_agent = name
+            self._agent_start = time.time()
             label = _AGENT_LABELS.get(name, name)
             self.console.print(
-                f"  [bold cyan]→[/bold cyan] [bold]{label}[/bold]{self._elapsed_tag()}"
+                f"  [bold cyan]→[/bold cyan] [bold]{label}[/bold]"
             )
 
     # -- sub-agent-level: MCP tool calls ---------------------------------------

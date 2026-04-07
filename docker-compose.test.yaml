@@ -1,23 +1,183 @@
+##############################################################################
+# SRE Agent — Chaos Engineering Test Environment
+#
+# Usage:
+#   docker compose -f docker-compose.test.yaml up -d
+#
+# Chaos commands:
+#   # CPU stress on chaos-target for 60 seconds
+#   docker exec sre-chaos-target stress-ng --cpu 2 --timeout 60s
+#
+#   # Memory stress (allocate 256MB)
+#   docker exec sre-chaos-target stress-ng --vm 1 --vm-bytes 256M --timeout 60s
+#
+#   # Stop a service to trigger TargetDown alert
+#   docker stop sre-app-web-2
+#
+#   # Kill Redis to trigger RedisDown alert
+#   docker stop sre-redis
+#
+# Minimum resources: 4GB RAM recommended for Docker Desktop
+##############################################################################
+
 services:
+
+  # =========================================================================
+  # Monitoring Stack
+  # =========================================================================
+
   prometheus:
     image: prom/prometheus:latest
-    container_name: sre-agent-prometheus
+    container_name: sre-prometheus
     ports:
       - "9090:9090"
     volumes:
-      - ./configs/prometheus-test.yml:/etc/prometheus/prometheus.yml
-    restart: unless-stopped
-
-  node-exporter:
-    image: prom/node-exporter:latest
-    container_name: sre-agent-node-exporter
-    ports:
-      - "9100:9100"
+      - ./configs/prometheus-test.yml:/etc/prometheus/prometheus.yml:ro
+      - ./configs/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
     restart: unless-stopped
 
   alertmanager:
     image: prom/alertmanager:latest
-    container_name: sre-agent-alertmanager
+    container_name: sre-alertmanager
     ports:
       - "9093:9093"
     restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: sre-node-exporter
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: sre-cadvisor
+    privileged: true
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    restart: unless-stopped
+
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: sre-redis-exporter
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # =========================================================================
+  # Application Servers  (monitored by cadvisor)
+  # =========================================================================
+
+  app-web-1:
+    image: nginx:latest
+    container_name: sre-app-web-1
+    ports:
+      - "8081:80"
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.5"
+    restart: unless-stopped
+
+  app-web-2:
+    image: nginx:latest
+    container_name: sre-app-web-2
+    ports:
+      - "8082:80"
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.5"
+    restart: unless-stopped
+
+  app-api:
+    image: traefik/whoami:latest
+    container_name: sre-app-api
+    ports:
+      - "8083:80"
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.25"
+    restart: unless-stopped
+
+  # =========================================================================
+  # Dependencies
+  # =========================================================================
+
+  redis:
+    image: redis:7-alpine
+    container_name: sre-redis
+    ports:
+      - "6379:6379"
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    restart: unless-stopped
+
+  # =========================================================================
+  # Elasticsearch  (for log analysis testing)
+  # =========================================================================
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    container_name: sre-elasticsearch
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms256m -Xmx256m
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
+  log-generator:
+    image: alpine:latest
+    container_name: sre-log-generator
+    depends_on:
+      - elasticsearch
+    volumes:
+      - ./configs/log-generator.sh:/log-generator.sh:ro
+    entrypoint: ["sh", "/log-generator.sh"]
+    restart: unless-stopped
+
+  # =========================================================================
+  # Chaos Engineering
+  # =========================================================================
+
+  chaos-target:
+    image: alpine:latest
+    container_name: sre-chaos-target
+    entrypoint: ["sh", "-c", "apk add --no-cache stress-ng > /dev/null 2>&1 && echo 'stress-ng ready' && sleep infinity"]
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "2.0"
+    restart: unless-stopped
+
+  flaky-service:
+    image: alpine:latest
+    container_name: sre-flaky-service
+    command: ["sh", "-c", "sleep $((RANDOM % 120 + 60)) && exit 1"]
+    deploy:
+      resources:
+        limits:
+          memory: 32M
+    restart: always
