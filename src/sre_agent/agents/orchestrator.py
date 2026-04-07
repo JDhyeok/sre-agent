@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from strands import Agent
 
-from sre_agent.agents.elasticsearch import create_elasticsearch_agent
-from sre_agent.agents.prometheus import create_prometheus_agent
+from sre_agent.agents.data_collector import create_data_collector_agent
 from sre_agent.agents.rca import create_rca_agent
 from sre_agent.agents.solution import create_solution_agent
 from sre_agent.agents.ssh import create_ssh_agent
@@ -29,51 +28,47 @@ def create_orchestrator(settings: Settings) -> Agent:
         baseline_hours=settings.prometheus.baseline_window_hours,
         elasticsearch_url=settings.elasticsearch.url,
         elasticsearch_index=settings.elasticsearch.default_index,
+        servicenow_url=settings.servicenow.instance_url,
         ssh_hosts=[h.model_dump() for h in settings.ssh.hosts],
     )
 
-    prometheus_agent = create_prometheus_agent(settings)
-    elasticsearch_agent = create_elasticsearch_agent(settings)
+    data_collector_agent = create_data_collector_agent(settings)
     ssh_agent = create_ssh_agent(settings)
     rca_agent = create_rca_agent(settings)
     solution_agent = create_solution_agent(settings)
 
     tools = [
-        prometheus_agent.as_tool(
-            name="prometheus_agent",
+        data_collector_agent.as_tool(
+            name="data_collector_agent",
             description=(
-                "Queries Prometheus metrics and Alertmanager alerts. "
-                "Use for error rates, latency percentiles, resource usage (CPU/memory/disk), "
-                "active firing alerts, and scrape target health. "
-                "Pass the incident context describing what to investigate."
-            ),
-        ),
-        elasticsearch_agent.as_tool(
-            name="elasticsearch_agent",
-            description=(
-                "Searches and analyzes application and infrastructure logs in Elasticsearch. "
-                "Use for error log patterns, log frequency timelines, affected service identification, "
-                "and field-level aggregations. "
-                "Pass the incident context describing what to investigate."
+                "Unified observability data investigator with access to Prometheus "
+                "(metrics, alerts), Elasticsearch (logs), and ServiceNow CMDB "
+                "(topology, dependencies). Performs top-down layer-by-layer "
+                "investigation: L1 symptom → L2 service → L3 application → "
+                "L4 dependency → L5 infrastructure → L6 platform. "
+                "Pass the full incident context and it autonomously decides "
+                "which data sources and layers to investigate."
             ),
         ),
         ssh_agent.as_tool(
             name="ssh_agent",
             description=(
                 "Executes read-only diagnostic commands on target servers via SSH. "
-                "Use for process inspection (ps, top), network state (ss, netstat), "
-                "disk/memory checks (df, free), and service status (systemctl). "
+                "Use for L5/L6 deep-dive: process inspection (ps, top), network "
+                "state (ss, netstat), disk/memory checks (df, free), and service "
+                "status (systemctl). Only call when data_collector_agent findings "
+                "suggest a need for live server diagnostics. "
                 "Pass the incident context and specify which hosts to check."
             ),
         ),
         rca_agent.as_tool(
             name="rca_agent",
             description=(
-                "Performs Root Cause Analysis on collected observability data. "
-                "Has NO tools - performs pure reasoning only. "
+                "Performs Root Cause Analysis using a 5-Phase Framework: "
+                "Triage → Timeline → Correlation → Root Cause (5 Whys) → Verification. "
+                "Has NO tools — performs pure reasoning only. "
                 "MUST be called AFTER data collection agents. "
-                "Pass ALL collected data from prometheus_agent, elasticsearch_agent, "
-                "and ssh_agent as input."
+                "Pass ALL collected data from data_collector_agent and ssh_agent."
             ),
         ),
         solution_agent.as_tool(

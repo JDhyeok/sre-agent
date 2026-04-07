@@ -27,10 +27,15 @@ ssh:
   #     username: "sre-readonly"
   #     key_path: "~/.ssh/sre_readonly_key"
 
+servicenow:
+  instance_url: ""
+
 mcp_servers:
   prometheus:
     transport: "stdio"
   elasticsearch:
     transport: "stdio"
   ssh:
+    transport: "stdio"
+  servicenow_cmdb:
     transport: "stdio"

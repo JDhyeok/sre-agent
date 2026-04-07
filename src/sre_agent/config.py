@@ -50,6 +50,10 @@ class SSHConfig(BaseModel):
     hosts: list[SSHHostConfig] = Field(default_factory=list)
 
 
+class ServiceNowConfig(BaseModel):
+    instance_url: str = ""
+
+
 class MCPTransportConfig(BaseModel):
     transport: str = "stdio"
 
@@ -58,6 +62,7 @@ class MCPServersConfig(BaseModel):
     prometheus: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
     elasticsearch: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
     ssh: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
+    servicenow_cmdb: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
 
 
 class Settings(BaseSettings):
@@ -65,6 +70,7 @@ class Settings(BaseSettings):
     prometheus: PrometheusConfig = Field(default_factory=PrometheusConfig)
     elasticsearch: ElasticsearchConfig = Field(default_factory=ElasticsearchConfig)
     ssh: SSHConfig = Field(default_factory=SSHConfig)
+    servicenow: ServiceNowConfig = Field(default_factory=ServiceNowConfig)
     mcp_servers: MCPServersConfig = Field(default_factory=MCPServersConfig)
 
     model_config = {"env_prefix": "SRE_AGENT_", "env_nested_delimiter": "__"}

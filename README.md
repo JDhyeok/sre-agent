@@ -7,14 +7,15 @@ Automated Root Cause Analysis (RCA) system using [Strands Agents SDK](https://st
 ```
 Trigger (CLI / Alertmanager Webhook)
   └─→ Orchestrator Agent
-        ├─→ Prometheus Agent  ──→ Prometheus MCP Server ──→ Prometheus API
-        ├─→ Elasticsearch Agent ──→ Elasticsearch MCP Server ──→ Elasticsearch API
+        ├─→ Data Collector Agent ──→ Prometheus MCP Server ──→ Prometheus API
+        │                        ──→ Elasticsearch MCP Server ──→ Elasticsearch API
+        │                        ──→ ServiceNow CMDB MCP Server ──→ CMDB API
         ├─→ SSH Agent ──→ SSH MCP Server ──→ Target Servers (read-only)
-        ├─→ RCA Agent (pure reasoning, no tools)
+        ├─→ RCA Agent (5-Phase Framework, pure reasoning)
         └─→ Solution Agent (remediation suggestions)
 ```
 
-Each specialist agent is registered as a tool via `.as_tool()`, allowing the Orchestrator's LLM to dynamically decide which agents to invoke and in what order based on the incident context.
+Each specialist agent is registered as a tool via `.as_tool()`. The **Data Collector** agent unifies metrics, logs, and topology into a single top-down investigation (L1 Symptom → L6 Platform). The **RCA Agent** applies a 5-Phase Framework: Triage → Timeline → Correlation → Root Cause (5 Whys) → Verification.
 
 ## Installation
 
@@ -105,14 +106,13 @@ sre-agent kb-list --count 10
 
 ## Agent Overview
 
-| Agent | Role | Tools | MCP Server |
-|-------|------|-------|------------|
-| **Orchestrator** | Coordinates all agents, produces final report | All agents (as tools) | - |
-| **Prometheus** | Metrics collection, baseline comparison, anomaly detection | `query_instant`, `query_range`, `get_active_alerts`, `get_targets_health` | Prometheus MCP |
-| **Elasticsearch** | Log search, error pattern extraction, timeline analysis | `search_logs`, `get_error_patterns`, `get_log_timeline`, `get_field_aggregation` | Elasticsearch MCP |
-| **SSH** | Read-only server diagnostics (processes, network, disk, services) | `exec_command`, `list_available_hosts`, `list_allowed_commands` | SSH MCP |
-| **RCA** | Root cause analysis via Chain-of-Thought reasoning | None (pure reasoning) | - |
-| **Solution** | Remediation recommendations (immediate/short-term/long-term) | None (pure reasoning) | - |
+| Agent | Role | MCP Servers |
+|-------|------|-------------|
+| **Orchestrator** | Coordinates all agents, manages investigation workflow | All agents (as tools) |
+| **Data Collector** | Unified metrics + logs + topology investigation (top-down L1-L6) | Prometheus, Elasticsearch, ServiceNow CMDB |
+| **SSH** | Read-only server diagnostics (processes, network, disk, services) | SSH |
+| **RCA** | 5-Phase root cause analysis (Triage → Timeline → Correlation → Root Cause → Verification) | None (pure reasoning) |
+| **Solution** | Remediation recommendations (immediate / short-term / long-term) | None (pure reasoning) |
 
 ## Security
 
@@ -130,14 +130,14 @@ src/sre_agent/
 ├── model.py                # LLM model setup (Anthropic with custom base_url)
 ├── agents/                 # Specialist agents
 │   ├── orchestrator.py     # Coordinates all agents
-│   ├── prometheus.py       # Metrics collection
-│   ├── elasticsearch.py    # Log analysis
+│   ├── data_collector.py   # Unified metrics + logs + topology
 │   ├── ssh.py              # System diagnostics
-│   ├── rca.py              # Root cause analysis
+│   ├── rca.py              # Root cause analysis (5-Phase)
 │   └── solution.py         # Remediation suggestions
 ├── mcp_servers/            # FastMCP tool servers
 │   ├── prometheus_server.py
 │   ├── elasticsearch_server.py
+│   ├── servicenow_cmdb_server.py
 │   └── ssh_server.py
 ├── prompts/                # System prompts for each agent
 ├── schemas/                # Pydantic models for structured output

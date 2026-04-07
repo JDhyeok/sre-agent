@@ -26,7 +26,7 @@ class RiskLevel(str, Enum):
     LOW = "low"
 
 
-# --- Prometheus Agent Output ---
+# --- Data Collector Agent Output ---
 
 
 class MetricAnomaly(BaseModel):
@@ -38,19 +38,6 @@ class MetricAnomaly(BaseModel):
     description: str
 
 
-class PrometheusReport(BaseModel):
-    """Output from the Prometheus Agent."""
-
-    timestamp: str
-    anomalies: list[MetricAnomaly] = Field(default_factory=list)
-    active_alerts: list[dict] = Field(default_factory=list)
-    unhealthy_targets: list[dict] = Field(default_factory=list)
-    summary: str
-
-
-# --- Elasticsearch Agent Output ---
-
-
 class LogPattern(BaseModel):
     template: str
     count: int
@@ -58,15 +45,26 @@ class LogPattern(BaseModel):
     sample_messages: list[str] = Field(default_factory=list, max_length=3)
 
 
-class ElasticsearchReport(BaseModel):
-    """Output from the Elasticsearch Agent."""
+class DataCollectorReport(BaseModel):
+    """Output from the unified Data Collector Agent."""
 
     timestamp: str
-    total_logs_analyzed: int
-    error_count: int
+    investigation_layers: list[str] = Field(
+        default_factory=list,
+        description="Which L1-L6 layers were investigated",
+    )
+    metric_anomalies: list[MetricAnomaly] = Field(default_factory=list)
+    active_alerts: list[dict] = Field(default_factory=list)
+    unhealthy_targets: list[dict] = Field(default_factory=list)
+    error_count: int = 0
     top_error_patterns: list[LogPattern] = Field(default_factory=list)
-    timeline_summary: str
     affected_services: list[str] = Field(default_factory=list)
+    topology_context: list[dict] = Field(
+        default_factory=list,
+        description="Service dependencies and CI relationships from CMDB",
+    )
+    key_findings: list[str] = Field(default_factory=list)
+    data_gaps: list[str] = Field(default_factory=list)
     summary: str
 
 
@@ -88,35 +86,56 @@ class SSHReport(BaseModel):
     summary: str
 
 
-# --- RCA Agent Output ---
+# --- RCA Agent Output (5-Phase Framework) ---
+
+
+class TriageResult(BaseModel):
+    symptom_type: str = Field(description="service_error | performance | availability | resource | data")
+    severity: Severity
+    blast_radius: str
+    affected_services: list[str] = Field(default_factory=list)
 
 
 class TimelineEvent(BaseModel):
     timestamp: str
-    source: str = Field(description="prometheus | elasticsearch | ssh | alert")
-    description: str
+    source: str = Field(description="prometheus | elasticsearch | ssh | alert | cmdb")
+    event: str
+    significance: str = Field(default="context", description="leading | lagging | context")
+
+
+class CorrelationFinding(BaseModel):
+    finding: str
+    sources: list[str] = Field(default_factory=list)
+    strength: str = Field(default="moderate", description="strong | moderate | weak")
 
 
 class RootCauseCandidate(BaseModel):
     cause: str
+    category: str = Field(description="deployment | resource | dependency | infrastructure | traffic | operational")
     confidence: Confidence
     evidence: list[str] = Field(min_length=1)
-    causal_chain: str = Field(description="A -> B -> C chain of causation")
+    causal_chain: str = Field(description="A -> B -> C -> symptom")
+
+
+class VerificationResult(BaseModel):
+    explains_all_symptoms: bool = True
+    counter_evidence: list[str] = Field(default_factory=list)
+    predictions: list[str] = Field(default_factory=list)
+    confidence_statement: str = ""
 
 
 class RCAReport(BaseModel):
-    """Output from the RCA Agent."""
+    """Output from the RCA Agent using 5-Phase Framework."""
 
-    incident_summary: str
+    triage: TriageResult | None = None
     timeline: list[TimelineEvent] = Field(default_factory=list)
-    anomalies_identified: list[str] = Field(default_factory=list)
-    correlations: list[str] = Field(default_factory=list)
+    correlations: list[CorrelationFinding] = Field(default_factory=list)
+    five_whys: list[str] = Field(default_factory=list)
     root_cause_candidates: list[RootCauseCandidate] = Field(min_length=1)
-    data_gaps: list[str] = Field(
-        default_factory=list,
-        description="Missing data that would improve analysis confidence",
-    )
+    verification: VerificationResult | None = None
+    data_gaps: list[str] = Field(default_factory=list)
     primary_root_cause: str
+    recommended_next_steps: list[str] = Field(default_factory=list)
 
 
 # --- Solution Agent Output ---
@@ -145,8 +164,7 @@ class IncidentAnalysis(BaseModel):
     """Complete incident analysis produced by the Orchestrator."""
 
     incident_context: str
-    prometheus_report: PrometheusReport | None = None
-    elasticsearch_report: ElasticsearchReport | None = None
+    data_collector_report: DataCollectorReport | None = None
     ssh_report: SSHReport | None = None
     rca_report: RCAReport | None = None
     solution_report: SolutionReport | None = None

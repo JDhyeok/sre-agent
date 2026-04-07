@@ -27,10 +27,20 @@ ssh:
   #     username: "sre-readonly"
   #     key_path: "~/.ssh/sre_readonly_key"
 
+servicenow:
+  instance_url: ""
+  # 인증은 환경변수로 설정:
+  # export SERVICENOW_API_TOKEN="your-token"
+  # 또는
+  # export SERVICENOW_USERNAME="admin"
+  # export SERVICENOW_PASSWORD="password"
+
 mcp_servers:
   prometheus:
     transport: "stdio"
   elasticsearch:
     transport: "stdio"
   ssh:
+    transport: "stdio"
+  servicenow_cmdb:
     transport: "stdio"
