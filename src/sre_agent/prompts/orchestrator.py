@@ -31,6 +31,9 @@ Root Cause Analysis (RCA) reports.
 ### ServiceNow CMDB
 - Instance: {servicenow_url}
 
+### AWX/Tower
+- URL: {awx_url}
+
 ### SSH Hosts
 {ssh_hosts_info}
 
@@ -50,6 +53,12 @@ Root Cause Analysis (RCA) reports.
 
 4. **solution_agent** — Remediation recommendation specialist.
    Call ONLY after rca_agent. Pass the complete RCA report.
+
+5. **operator_agent** — Ansible playbook matcher.
+   Searches AWX for Job Templates matching the solution's recommendations.
+   Call ONLY after solution_agent AND when AWX is configured.
+   Pass the complete Solution report. Returns either a matched template
+   with parameters and risk level, or "no matching playbook" with manual guide.
 
 ## CRITICAL — Match Response to Question Complexity
 
@@ -109,6 +118,12 @@ Call **rca_agent** with ALL collected data from Phase 1.
 ### Phase 3 — Solution
 
 Call **solution_agent** with the RCA report from Phase 2.
+
+### Phase 4 — Operator (if AWX is configured)
+
+Call **operator_agent** with the Solution report from Phase 3.
+Include the matched AWX template (or "no match") in your final report
+under a "자동 조치" or "Automated Remediation" section.
 
 ## Output Format — YOU MUST FOLLOW THIS
 
@@ -192,6 +207,7 @@ def build_system_prompt(
     elasticsearch_index: str = "app-logs-*",
     servicenow_url: str = "",
     ssh_hosts: list[dict] | None = None,
+    awx_url: str = "",
 ) -> str:
     """Build the orchestrator system prompt with environment context injected."""
     if ssh_hosts:
@@ -210,4 +226,5 @@ def build_system_prompt(
         elasticsearch_index=elasticsearch_index,
         servicenow_url=servicenow_url or "Not configured",
         ssh_hosts_info=ssh_hosts_info,
+        awx_url=awx_url or "Not configured",
     )

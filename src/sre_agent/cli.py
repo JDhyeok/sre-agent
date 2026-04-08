@@ -24,6 +24,7 @@ __version__ = "0.1.0"
 app = typer.Typer(
     name="sre-agent",
     help="SRE Multi-Agent System for automated Root Cause Analysis",
+    invoke_without_command=True,
 )
 console = Console()
 
@@ -316,6 +317,7 @@ def _read_input() -> str:
 
 @app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     config: Annotated[
         Optional[Path],
         typer.Option("--config", "-c", help="Path to settings YAML config"),
@@ -329,6 +331,9 @@ def main(
     if version:
         console.print(f"sre-agent v{__version__}")
         raise typer.Exit()
+
+    if ctx.invoked_subcommand is not None:
+        return
 
     _load_env_file()
 
@@ -406,6 +411,68 @@ def main(
         _print_response(str(response))
         _print_elapsed(elapsed)
         console.print()
+
+
+# ---------------------------------------------------------------------------
+# Pipeline server mode
+# ---------------------------------------------------------------------------
+
+@app.command()
+def serve(
+    port: Annotated[
+        int,
+        typer.Option("--port", "-p", help="Port to bind to"),
+    ] = 8080,
+    host: Annotated[
+        str,
+        typer.Option("--host", "-h", help="Host to bind to"),
+    ] = "0.0.0.0",
+    config: Annotated[
+        Optional[Path],
+        typer.Option("--config", "-c", help="Path to settings YAML config"),
+    ] = None,
+) -> None:
+    """Start the automated SRE pipeline server (webhook receiver + analyzer)."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]  Pipeline server requires uvicorn. Install with: pip install sre-agent[webhook][/red]")
+        raise typer.Exit(1)
+
+    _load_env_file()
+    settings = load_settings(config)
+
+    if not settings.anthropic.api_key:
+        console.print("[bold red]  Error:[/bold red] ANTHROPIC_API_KEY is not set.")
+        console.print(f"[dim]  Run: export ANTHROPIC_API_KEY=\"your-key\"[/dim]")
+        raise typer.Exit(1)
+
+    from sre_agent.pipeline.server import create_pipeline_app
+
+    pipeline_app = create_pipeline_app(settings)
+
+    console.print()
+    console.print(Panel(
+        Text("  SRE Agent Pipeline Server", style="bold red"),
+        border_style="red", expand=False, padding=(0, 1),
+    ))
+    console.print()
+    console.print(f"  [bold]Listening:[/bold] http://{host}:{port}")
+    console.print(f"  [bold]Endpoints:[/bold]")
+    console.print(f"  [dim]  POST /webhook/alertmanager — Alertmanager receiver[/dim]")
+    console.print(f"  [dim]  POST /webhook/generic     — Generic webhook[/dim]")
+    console.print(f"  [dim]  GET  /incidents            — Incident list[/dim]")
+    console.print(f"  [dim]  GET  /approve/{{id}}        — Approval web UI[/dim]")
+    console.print(f"  [dim]  GET  /health               — Health check[/dim]")
+    console.print()
+
+    if settings.delivery.teams_webhook_url:
+        console.print(f"  [bold]Teams:[/bold] [green]configured[/green]")
+    else:
+        console.print(f"  [bold]Teams:[/bold] [yellow]not configured[/yellow] (reports will be logged only)")
+    console.print()
+
+    uvicorn.run(pipeline_app, host=host, port=port, log_level="info")
 
 
 if __name__ == "__main__":

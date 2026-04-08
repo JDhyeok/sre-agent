@@ -38,6 +38,25 @@ ssh:
 servicenow:
   instance_url: ""
 
+# 파이프라인: 알림 수신 설정
+intake:
+  dedup_window_minutes: 5        # 동일 알림 중복 제거 윈도우
+  group_window_seconds: 60       # 연관 알림 그룹핑 윈도우
+  severity_routing:
+    critical: "full_analysis"    # 4 agents 전부
+    warning: "lightweight"       # data_collector만 (이상시 승격)
+    info: "log_only"             # 로그 기록만
+    resolved: "summary_only"     # 요약만
+
+# 파이프라인: Teams 전달 설정
+delivery:
+  teams_webhook_url: ""          # Microsoft Teams Incoming Webhook URL
+
+# Ansible AWX/Tower 연동
+awx:
+  url: ""                        # AWX API URL (e.g. https://awx.example.com)
+  token: ""                      # AWX Personal Access Token
+
 mcp_servers:
   prometheus:
     transport: "stdio"
@@ -46,4 +65,6 @@ mcp_servers:
   ssh:
     transport: "stdio"
   servicenow_cmdb:
+    transport: "stdio"
+  awx:
     transport: "stdio"

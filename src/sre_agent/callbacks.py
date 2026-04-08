@@ -12,6 +12,7 @@ _AGENT_LABELS: dict[str, str] = {
     "ssh_agent": "SSH Diagnostics",
     "rca_agent": "Root Cause Analysis",
     "solution_agent": "Solution",
+    "operator_agent": "Operator",
 }
 
 

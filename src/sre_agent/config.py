@@ -67,6 +67,26 @@ class ServiceNowConfig(BaseModel):
     instance_url: str = ""
 
 
+class IntakeConfig(BaseModel):
+    dedup_window_minutes: int = 5
+    group_window_seconds: int = 60
+    severity_routing: dict[str, str] = Field(default_factory=lambda: {
+        "critical": "full_analysis",
+        "warning": "lightweight",
+        "info": "log_only",
+        "resolved": "summary_only",
+    })
+
+
+class DeliveryConfig(BaseModel):
+    teams_webhook_url: str = ""
+
+
+class AWXConfig(BaseModel):
+    url: str = ""
+    token: str = ""
+
+
 class MCPTransportConfig(BaseModel):
     transport: str = "stdio"
 
@@ -76,6 +96,7 @@ class MCPServersConfig(BaseModel):
     elasticsearch: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
     ssh: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
     servicenow_cmdb: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
+    awx: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
 
 
 class Settings(BaseSettings):
@@ -85,6 +106,9 @@ class Settings(BaseSettings):
     elasticsearch: ElasticsearchConfig = Field(default_factory=ElasticsearchConfig)
     ssh: SSHConfig = Field(default_factory=SSHConfig)
     servicenow: ServiceNowConfig = Field(default_factory=ServiceNowConfig)
+    intake: IntakeConfig = Field(default_factory=IntakeConfig)
+    delivery: DeliveryConfig = Field(default_factory=DeliveryConfig)
+    awx: AWXConfig = Field(default_factory=AWXConfig)
     mcp_servers: MCPServersConfig = Field(default_factory=MCPServersConfig)
 
     model_config = {"env_prefix": "SRE_AGENT_", "env_nested_delimiter": "__"}

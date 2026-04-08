@@ -39,7 +39,7 @@ dependencies = [
 
 [project.optional-dependencies]
 ssh = ["paramiko"]
-webhook = ["fastapi", "uvicorn"]
+webhook = ["fastapi", "uvicorn", "jinja2"]
 all = ["sre-agent[ssh,webhook]"]
 dev = ["pytest", "pytest-asyncio", "ruff", "build", "twine"]
 
@@ -57,6 +57,7 @@ packages = ["src/sre_agent"]
 [tool.hatch.build.targets.wheel.force-include]
 "src/sre_agent/defaults/settings.yaml" = "sre_agent/defaults/settings.yaml"
 "src/sre_agent/defaults/ssh_allowlist.yaml" = "sre_agent/defaults/ssh_allowlist.yaml"
+"src/sre_agent/templates/approval.html" = "sre_agent/templates/approval.html"
 
 [tool.hatch.build.targets.sdist]
 include = ["src/sre_agent/**", "configs/**", "README.md", "LICENSE"]

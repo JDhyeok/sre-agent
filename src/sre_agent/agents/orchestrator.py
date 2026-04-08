@@ -7,6 +7,7 @@ from typing import Any, Callable
 from strands import Agent
 
 from sre_agent.agents.data_collector import create_data_collector_agent
+from sre_agent.agents.operator import create_operator_agent
 from sre_agent.agents.rca import create_rca_agent
 from sre_agent.agents.solution import create_solution_agent
 from sre_agent.agents.ssh import create_ssh_agent
@@ -38,6 +39,7 @@ def create_orchestrator(
         elasticsearch_index=settings.elasticsearch.default_index,
         servicenow_url=settings.servicenow.instance_url,
         ssh_hosts=[h.model_dump() for h in settings.ssh.hosts],
+        awx_url=settings.awx.url,
     )
 
     data_collector_agent = create_data_collector_agent(
@@ -46,6 +48,7 @@ def create_orchestrator(
     ssh_agent = create_ssh_agent(settings, callback_handler=tool_callback_handler)
     rca_agent = create_rca_agent(settings, callback_handler=tool_callback_handler)
     solution_agent = create_solution_agent(settings, callback_handler=tool_callback_handler)
+    operator_agent = create_operator_agent(settings, callback_handler=tool_callback_handler)
 
     tools = [
         data_collector_agent.as_tool(
@@ -88,6 +91,18 @@ def create_orchestrator(
                 "MUST be called AFTER rca_agent. "
                 "Pass the complete RCA report as input. "
                 "Returns immediate actions, short-term fixes, and long-term recommendations."
+            ),
+        ),
+        operator_agent.as_tool(
+            name="operator_agent",
+            description=(
+                "Matches Solution Agent's remediation recommendations to executable "
+                "Ansible AWX Job Templates. Searches AWX for matching playbooks, "
+                "verifies template parameters, and classifies risk level. "
+                "MUST be called AFTER solution_agent. "
+                "Pass the complete Solution report as input. "
+                "Returns either a matched template with parameters, "
+                "or a 'no match' with manual action guide."
             ),
         ),
     ]
