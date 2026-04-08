@@ -17,7 +17,9 @@
 #   # Kill Redis to trigger RedisDown alert
 #   docker stop sre-redis
 #
-# Minimum resources: 4GB RAM recommended for Docker Desktop
+# AWX UI: http://localhost:8043  (admin / password)
+#
+# Minimum resources: 6GB RAM recommended for Docker Desktop
 ##############################################################################
 
 services:
@@ -183,3 +185,89 @@ services:
         limits:
           memory: 32M
     restart: always
+
+  # =========================================================================
+  # AWX (Ansible Automation Platform)
+  #
+  # AWX UI:  http://localhost:8043
+  # Login:   admin / password
+  #
+  # After startup, create a sample Job Template via:
+  #   docker exec sre-awx-web bash -c "
+  #     awx-manage create_preload_data
+  #   "
+  # =========================================================================
+
+  awx-postgres:
+    image: postgres:15-alpine
+    container_name: sre-awx-postgres
+    environment:
+      POSTGRES_DB: awx
+      POSTGRES_USER: awx
+      POSTGRES_PASSWORD: awxpass
+    volumes:
+      - awx-postgres-data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    restart: unless-stopped
+
+  awx-redis:
+    image: redis:7-alpine
+    container_name: sre-awx-redis
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    restart: unless-stopped
+
+  awx-web:
+    image: quay.io/ansible/awx:24.6.1
+    container_name: sre-awx-web
+    hostname: awxweb
+    ports:
+      - "8043:8052"
+    environment:
+      DATABASE_HOST: awx-postgres
+      DATABASE_NAME: awx
+      DATABASE_USER: awx
+      DATABASE_PASSWORD: awxpass
+      DATABASE_PORT: "5432"
+      REDIS_HOST: awx-redis
+      REDIS_PORT: "6379"
+      AWX_ADMIN_USER: admin
+      AWX_ADMIN_PASSWORD: password
+    depends_on:
+      - awx-postgres
+      - awx-redis
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    restart: unless-stopped
+
+  awx-task:
+    image: quay.io/ansible/awx:24.6.1
+    container_name: sre-awx-task
+    hostname: awxtask
+    command: ["launch_awx_task.sh"]
+    environment:
+      DATABASE_HOST: awx-postgres
+      DATABASE_NAME: awx
+      DATABASE_USER: awx
+      DATABASE_PASSWORD: awxpass
+      DATABASE_PORT: "5432"
+      REDIS_HOST: awx-redis
+      REDIS_PORT: "6379"
+      SUPERVISOR_WEB_CONFIG_PATH: /etc/supervisord.conf
+    depends_on:
+      - awx-web
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    restart: unless-stopped
+
+volumes:
+  awx-postgres-data:

@@ -54,8 +54,8 @@ delivery:
 
 # Ansible AWX/Tower 연동
 awx:
-  url: ""                        # AWX API URL (e.g. https://awx.example.com)
-  token: ""                      # AWX Personal Access Token
+  url: ""                        # AWX API URL (e.g. http://localhost:8043)
+  token: ""                      # AWX Personal Access Token (Settings > Tokens에서 발급)
 
 mcp_servers:
   prometheus:
