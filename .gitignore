@@ -28,6 +28,9 @@ env/
 data/
 *.json.bak
 
+# Plans
+PLAN.md
+
 # OS
 .DS_Store
 Thumbs.db
