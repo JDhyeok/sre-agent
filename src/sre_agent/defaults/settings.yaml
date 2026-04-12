@@ -51,11 +51,10 @@ intake:
 # 파이프라인: Teams 전달 설정
 delivery:
   teams_webhook_url: ""          # Microsoft Teams Incoming Webhook URL
-
-# Ansible AWX/Tower 연동
-awx:
-  url: ""                        # AWX API URL (e.g. http://localhost:8043)
-  token: ""                      # AWX Personal Access Token (Settings > Tokens에서 발급)
+  # 파이프라인 서버의 외부 공개 URL. Teams 카드 안의 승인/상세 링크에 사용된다.
+  # 비어 있으면 로그에만 출력되고 Teams 카드 버튼은 생성되지 않는다.
+  # 예: "https://sre-agent.example.com"
+  public_base_url: ""
 
 mcp_servers:
   prometheus:
@@ -65,6 +64,4 @@ mcp_servers:
   ssh:
     transport: "stdio"
   servicenow_cmdb:
-    transport: "stdio"
-  awx:
     transport: "stdio"

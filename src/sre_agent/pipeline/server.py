@@ -6,24 +6,62 @@ Endpoints:
     GET  /health                — Health check
     GET  /incidents             — Recent incidents list
     GET  /incidents/{id}        — Incident detail
-"""
 
-from __future__ import annotations
+NOTE: This module intentionally does NOT use ``from __future__ import annotations``.
+FastAPI's route registration calls ``typing.get_type_hints()`` on endpoint
+functions, and PEP 563 string-ified annotations combined with endpoints defined
+inside ``create_pipeline_app`` (closure over ``intake``, ``_lock``, etc.) make
+FastAPI unable to resolve request body types — it falls back to treating them as
+query params, producing ``422 {"loc": ["query", "payload"], ...}``.
+"""
 
 import logging
 import threading
+import time
 from typing import Any
+
+from pydantic import BaseModel
 
 from sre_agent.config import Settings
 
 logger = logging.getLogger(__name__)
 
 
+# -- Pydantic models for request validation -----------------------------------
+#
+# These MUST live at module scope. FastAPI resolves endpoint type hints via
+# ``typing.get_type_hints()``, and with ``from __future__ import annotations``
+# all hints become strings — a class defined inside ``create_pipeline_app`` is
+# invisible to that lookup, so FastAPI would fall back to treating the payload
+# as a query parameter and every request would 422 with
+# ``{"loc": ["query", "payload"], "msg": "Field required"}``.
+
+class AlertmanagerPayload(BaseModel):
+    version: str = ""
+    groupKey: str = ""
+    status: str = ""
+    receiver: str = ""
+    groupLabels: dict = {}
+    commonLabels: dict = {}
+    commonAnnotations: dict = {}
+    externalURL: str = ""
+    alerts: list[dict] = []
+
+
+class GenericPayload(BaseModel):
+    alertname: str = ""
+    title: str = ""
+    severity: str = "warning"
+    status: str = "firing"
+    message: str = ""
+    labels: dict = {}
+    annotations: dict = {}
+
+
 def create_pipeline_app(settings: Settings):
     """Create and return a FastAPI application wired to the full pipeline."""
     try:
         from fastapi import BackgroundTasks, FastAPI
-        from pydantic import BaseModel
     except ImportError:
         raise RuntimeError(
             "Pipeline server requires fastapi. Install with: pip install sre-agent[webhook]"
@@ -44,31 +82,10 @@ def create_pipeline_app(settings: Settings):
     _incidents: dict[str, dict[str, Any]] = {}
     _lock = threading.Lock()
 
-    # -- Pydantic models for request validation --------------------------------
-
-    class AlertmanagerPayload(BaseModel):
-        version: str = ""
-        groupKey: str = ""
-        status: str = ""
-        receiver: str = ""
-        groupLabels: dict = {}
-        commonLabels: dict = {}
-        commonAnnotations: dict = {}
-        externalURL: str = ""
-        alerts: list[dict] = []
-
-    class GenericPayload(BaseModel):
-        alertname: str = ""
-        title: str = ""
-        severity: str = "warning"
-        status: str = "firing"
-        message: str = ""
-        labels: dict = {}
-        annotations: dict = {}
-
     # -- Background analysis runner -------------------------------------------
 
     _teams_url = settings.delivery.teams_webhook_url
+    _public_base_url = settings.delivery.public_base_url
 
     def _run_analysis(incident_request) -> None:
         from sre_agent.pipeline.intake import IncidentRequest
@@ -78,17 +95,18 @@ def create_pipeline_app(settings: Settings):
         with _lock:
             _incidents[req.incident_id]["status"] = "analyzing"
 
-        if _teams_url:
-            try:
-                from sre_agent.pipeline.delivery import send_alert_received
-                alert_summary = f"{req.primary_alertname} ({req.primary_severity})"
-                send_alert_received(_teams_url, req.incident_id, alert_summary)
-            except Exception:
-                logger.exception("Failed to send Teams start notification for %s", req.incident_id)
+        try:
+            from sre_agent.pipeline.delivery import send_alert_received
+            alert_summary = f"{req.primary_alertname} ({req.primary_severity})"
+            # send_alert_received logs to console when teams_webhook_url is "".
+            send_alert_received(_teams_url, req.incident_id, alert_summary)
+        except Exception:
+            logger.exception("Failed to deliver start notification for %s", req.incident_id)
 
         result: AnalysisResult = analyzer.analyze(req)
 
         has_action = "MATCH_FOUND" in result.report
+        report_sent_at = time.time()
 
         with _lock:
             _incidents[req.incident_id].update({
@@ -96,14 +114,12 @@ def create_pipeline_app(settings: Settings):
                 "report": result.report,
                 "elapsed_seconds": result.elapsed_seconds,
                 "analysis_level": result.analysis_level.value,
-                "similar_incidents": [
-                    inc.get("id", "") for inc in result.similar_incidents
-                ],
                 "has_action": has_action,
                 "error": result.error,
+                "report_sent_at": report_sent_at,
             })
 
-        if _teams_url and result.status in ("completed", "skipped"):
+        if result.status in ("completed", "skipped"):
             try:
                 from sre_agent.pipeline.delivery import send_report
                 send_report(
@@ -112,10 +128,10 @@ def create_pipeline_app(settings: Settings):
                     report=result.report,
                     elapsed=result.elapsed_seconds,
                     has_action=has_action,
-                    server_base_url="",
+                    server_base_url=_public_base_url,
                 )
             except Exception:
-                logger.exception("Failed to send Teams report for %s", req.incident_id)
+                logger.exception("Failed to deliver report for %s", req.incident_id)
 
     # -- Endpoints ------------------------------------------------------------
 

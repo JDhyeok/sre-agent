@@ -1,31 +1,49 @@
 ##############################################################################
-# SRE Agent — Chaos Engineering Test Environment
+# SRE Agent — End-to-end test stack (memory-leak scenario)
+#
+# Scenario:
+#   memory-leak-app slowly fills its cgroup memory toward ~86% of the
+#   container's 256 MiB limit, then holds. Once working_set / spec_limit
+#   > 0.80 for 1 minute, Prometheus fires ContainerMemoryPressure (severity:
+#   critical). The 0.80 threshold (rather than e.g. 0.95) keeps the demo
+#   reliable: pushing the daemon closer to the cgroup limit risks an OOM-kill
+#   before we ever observe the alert. 80%/1m is also a realistic operational
+#   warning level — 95% is typically already too late to remediate gracefully.
+#   Alertmanager POSTs the alert to `sre-agent serve` running on the host
+#   (host.docker.internal:8080), which runs the full pipeline:
+#
+#     intake → analyzer → orchestrator → runbook_matcher_agent
+#                                          ↳ matches memory-leak-restart
+#                                          ↳ approval link → SSH → docker restart
 #
 # Usage:
 #   docker compose -f docker-compose.test.yaml up -d
 #
-# Chaos commands:
-#   # CPU stress on chaos-target for 60 seconds
-#   docker exec sre-chaos-target stress-ng --cpu 2 --timeout 60s
+#   # In another terminal:
+#   sre-agent serve --port 8080
 #
-#   # Memory stress (allocate 256MB)
-#   docker exec sre-chaos-target stress-ng --vm 1 --vm-bytes 256M --timeout 60s
+#   # Watch the leak climb (~3 minutes to cross 95%):
+#   docker logs -f sre-memory-leak-app
 #
-#   # Stop a service to trigger TargetDown alert
-#   docker stop sre-app-web-2
+# Manual reset (if you want to re-trigger without waiting):
+#   docker restart sre-memory-leak-app
 #
-#   # Kill Redis to trigger RedisDown alert
-#   docker stop sre-redis
+# Runbook executed by the approval pipeline:
+#   src/sre_agent/runbooks/memory-leak-restart.md
+#   src/sre_agent/runbooks/scripts/restart-memory-leak-app.sh
 #
-# AWX UI: http://localhost:8043  (admin / password)
+# SSH for the approval pipeline: settings.ssh.hosts must include a host
+# (typically the local Docker host) where the approval handler can pipe
+# the script via `ssh ... bash -s`. The approving SSH user needs `docker`
+# permission for `docker restart sre-memory-leak-app`.
 #
-# Minimum resources: 6GB RAM recommended for Docker Desktop
+# Minimum resources: ~1.5 GB RAM is enough for this stack.
 ##############################################################################
 
 services:
 
   # =========================================================================
-  # Monitoring Stack
+  # Monitoring (Prometheus + Alertmanager + cAdvisor)
   # =========================================================================
 
   prometheus:
@@ -33,9 +51,75 @@ services:
     container_name: sre-prometheus
     ports:
       - "9090:9090"
-    volumes:
-      - ./configs/prometheus-test.yml:/etc/prometheus/prometheus.yml:ro
-      - ./configs/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cat > /tmp/alert-rules.yml << 'RULES'
+        groups:
+          - name: sre-agent-test
+            rules:
+              # Match by Docker label sre_test_role and/or compose service name.
+              # Note: do not use container!="" — Docker/cAdvisor often exposes
+              # an empty `container` label for the root cgroup.
+              - alert: ContainerMemoryPressure
+                expr: |
+                  max(
+                    container_memory_working_set_bytes{container_label_sre_test_role="memory-leak",container!="POD",image!=""}
+                    or
+                    container_memory_working_set_bytes{container_label_com_docker_compose_service="memory-leak-app",container!="POD",image!=""}
+                  )
+                  /
+                  clamp_min(
+                    min(
+                      container_spec_memory_limit_bytes{container_label_sre_test_role="memory-leak",container!="POD",image!=""}
+                      or
+                      container_spec_memory_limit_bytes{container_label_com_docker_compose_service="memory-leak-app",container!="POD",image!=""}
+                    ),
+                    1
+                  )
+                  > 0.80
+                for: 1m
+                labels:
+                  severity: critical
+                  service: memory-leak-app
+                  container: sre-memory-leak-app
+                annotations:
+                  summary: "memory-leak-app container memory > 80% of limit for 1m"
+                  description: |
+                    Container sre-memory-leak-app working set has exceeded 80% of its
+                    cgroup memory limit (256 MiB) for 1 minute. The application is a
+                    known periodic memory-leaker — the development team is still
+                    iterating on a fix, so the standard remediation is to restart the
+                    container per runbook memory-leak-restart. Host node is healthy;
+                    only the single container is affected.
+              - alert: CadvisorDown
+                expr: up{job="cadvisor"} == 0
+                for: 30s
+                labels:
+                  severity: critical
+                annotations:
+                  summary: "cAdvisor scrape target is down"
+        RULES
+        cat > /tmp/prometheus.yml << 'PROM'
+        global:
+          scrape_interval: 15s
+          evaluation_interval: 15s
+        rule_files:
+          - /tmp/alert-rules.yml
+        alerting:
+          alertmanagers:
+            - static_configs:
+                - targets: ["alertmanager:9093"]
+        scrape_configs:
+          - job_name: prometheus
+            static_configs:
+              - targets: ["localhost:9090"]
+          - job_name: cadvisor
+            metrics_path: /metrics
+            static_configs:
+              - targets: ["cadvisor:8080"]
+        PROM
+        /bin/prometheus --config.file=/tmp/prometheus.yml --storage.tsdb.retention.time=7d
     restart: unless-stopped
 
   alertmanager:
@@ -43,15 +127,26 @@ services:
     container_name: sre-alertmanager
     ports:
       - "9093:9093"
-    volumes:
-      - ./configs/alertmanager-test.yml:/etc/alertmanager/alertmanager.yml:ro
-    restart: unless-stopped
-
-  node-exporter:
-    image: prom/node-exporter:latest
-    container_name: sre-node-exporter
-    ports:
-      - "9100:9100"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cat > /tmp/alertmanager.yml << 'AM'
+        global:
+          resolve_timeout: 5m
+        route:
+          receiver: webhook
+          group_wait: 10s
+          group_interval: 30s
+          repeat_interval: 1h
+        receivers:
+          - name: webhook
+            webhook_configs:
+              - url: "http://host.docker.internal:8080/webhook/alertmanager"
+                send_resolved: true
+        AM
+        /bin/alertmanager --config.file=/tmp/alertmanager.yml
     restart: unless-stopped
 
   cadvisor:
@@ -59,215 +154,35 @@ services:
     container_name: sre-cadvisor
     privileged: true
     ports:
-      - "8080:8080"
+      - "8082:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
     restart: unless-stopped
 
-  redis-exporter:
-    image: oliver006/redis_exporter:latest
-    container_name: sre-redis-exporter
-    ports:
-      - "9121:9121"
-    environment:
-      - REDIS_ADDR=redis://redis:6379
-    depends_on:
-      - redis
-    restart: unless-stopped
-
   # =========================================================================
-  # Application Servers  (monitored by cadvisor)
+  # Memory-leak workload (cgroup limit → slow fill toward ~96%)
   # =========================================================================
 
-  app-web-1:
-    image: nginx:latest
-    container_name: sre-app-web-1
-    ports:
-      - "8081:80"
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-          cpus: "0.5"
-    restart: unless-stopped
-
-  app-web-2:
-    image: nginx:latest
-    container_name: sre-app-web-2
-    ports:
-      - "8082:80"
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-          cpus: "0.5"
-    restart: unless-stopped
-
-  app-api:
-    image: traefik/whoami:latest
-    container_name: sre-app-api
-    ports:
-      - "8083:80"
-    deploy:
-      resources:
-        limits:
-          memory: 64M
-          cpus: "0.25"
-    restart: unless-stopped
-
-  # =========================================================================
-  # Dependencies
-  # =========================================================================
-
-  redis:
-    image: redis:7-alpine
-    container_name: sre-redis
-    ports:
-      - "6379:6379"
-    deploy:
-      resources:
-        limits:
-          memory: 64M
-    restart: unless-stopped
-
-  # =========================================================================
-  # Elasticsearch  (for log analysis testing)
-  # =========================================================================
-
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
-    container_name: sre-elasticsearch
-    ports:
-      - "9200:9200"
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - ES_JAVA_OPTS=-Xms256m -Xmx256m
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-    restart: unless-stopped
-
-  log-generator:
-    image: alpine:latest
-    container_name: sre-log-generator
-    depends_on:
-      - elasticsearch
+  memory-leak-app:
+    image: python:3.12-alpine
+    container_name: sre-memory-leak-app
+    labels:
+      sre_test_role: memory-leak
     volumes:
-      - ./configs/log-generator.sh:/log-generator.sh:ro
-    entrypoint: ["sh", "/log-generator.sh"]
-    restart: unless-stopped
-
-  # =========================================================================
-  # Chaos Engineering
-  # =========================================================================
-
-  chaos-target:
-    image: alpine:latest
-    container_name: sre-chaos-target
-    entrypoint: ["sh", "-c", "apk add --no-cache stress-ng > /dev/null 2>&1 && echo 'stress-ng ready' && sleep infinity"]
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: "2.0"
-    restart: unless-stopped
-
-  flaky-service:
-    image: alpine:latest
-    container_name: sre-flaky-service
-    command: ["sh", "-c", "sleep $((RANDOM % 120 + 60)) && exit 1"]
-    deploy:
-      resources:
-        limits:
-          memory: 32M
-    restart: always
-
-  # =========================================================================
-  # AWX (Ansible Automation Platform)
-  #
-  # AWX UI:  http://localhost:8043
-  # Login:   admin / password
-  #
-  # After startup, create a sample Job Template via:
-  #   docker exec sre-awx-web bash -c "
-  #     awx-manage create_preload_data
-  #   "
-  # =========================================================================
-
-  awx-postgres:
-    image: postgres:15-alpine
-    container_name: sre-awx-postgres
+      - ./configs/memory-leak-daemon.py:/memory-leak-daemon.py:ro
+    command: ["python3", "-u", "/memory-leak-daemon.py"]
     environment:
-      POSTGRES_DB: awx
-      POSTGRES_USER: awx
-      POSTGRES_PASSWORD: awxpass
-    volumes:
-      - awx-postgres-data:/var/lib/postgresql/data
+      # Heap target as a fraction of the cgroup limit. With ~25 MiB of
+      # interpreter RSS on top of a 256 MiB limit, 0.86 puts working_set
+      # comfortably above the 0.95 alert threshold.
+      MEMORY_LEAK_TARGET_RATIO: "0.86"
+      MEMORY_LEAK_CHUNK_BYTES: "3145728"
+      MEMORY_LEAK_STEP_SLEEP: "1"
     deploy:
       resources:
         limits:
           memory: 256M
+          cpus: "0.25"
     restart: unless-stopped
-
-  awx-redis:
-    image: redis:7-alpine
-    container_name: sre-awx-redis
-    deploy:
-      resources:
-        limits:
-          memory: 64M
-    restart: unless-stopped
-
-  awx-web:
-    image: quay.io/ansible/awx:24.6.1
-    container_name: sre-awx-web
-    hostname: awxweb
-    ports:
-      - "8043:8052"
-    environment:
-      DATABASE_HOST: awx-postgres
-      DATABASE_NAME: awx
-      DATABASE_USER: awx
-      DATABASE_PASSWORD: awxpass
-      DATABASE_PORT: "5432"
-      REDIS_HOST: awx-redis
-      REDIS_PORT: "6379"
-      AWX_ADMIN_USER: admin
-      AWX_ADMIN_PASSWORD: password
-    depends_on:
-      - awx-postgres
-      - awx-redis
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-    restart: unless-stopped
-
-  awx-task:
-    image: quay.io/ansible/awx:24.6.1
-    container_name: sre-awx-task
-    hostname: awxtask
-    command: ["launch_awx_task.sh"]
-    environment:
-      DATABASE_HOST: awx-postgres
-      DATABASE_NAME: awx
-      DATABASE_USER: awx
-      DATABASE_PASSWORD: awxpass
-      DATABASE_PORT: "5432"
-      REDIS_HOST: awx-redis
-      REDIS_PORT: "6379"
-      SUPERVISOR_WEB_CONFIG_PATH: /etc/supervisord.conf
-    depends_on:
-      - awx-web
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-    restart: unless-stopped
-
-volumes:
-  awx-postgres-data:

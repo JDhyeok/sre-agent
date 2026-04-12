@@ -80,11 +80,10 @@ class IntakeConfig(BaseModel):
 
 class DeliveryConfig(BaseModel):
     teams_webhook_url: str = ""
-
-
-class AWXConfig(BaseModel):
-    url: str = ""
-    token: str = ""
+    # Public base URL of the pipeline server (e.g. https://sre-agent.example.com).
+    # Used to render the approval / detail links in Teams cards. When empty,
+    # links are still emitted to logs but no Teams card buttons are added.
+    public_base_url: str = ""
 
 
 class MCPTransportConfig(BaseModel):
@@ -96,7 +95,6 @@ class MCPServersConfig(BaseModel):
     elasticsearch: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
     ssh: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
     servicenow_cmdb: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
-    awx: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
 
 
 class Settings(BaseSettings):
@@ -108,7 +106,6 @@ class Settings(BaseSettings):
     servicenow: ServiceNowConfig = Field(default_factory=ServiceNowConfig)
     intake: IntakeConfig = Field(default_factory=IntakeConfig)
     delivery: DeliveryConfig = Field(default_factory=DeliveryConfig)
-    awx: AWXConfig = Field(default_factory=AWXConfig)
     mcp_servers: MCPServersConfig = Field(default_factory=MCPServersConfig)
 
     model_config = {"env_prefix": "SRE_AGENT_", "env_nested_delimiter": "__"}

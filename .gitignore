@@ -31,6 +31,17 @@ data/
 # Plans
 PLAN.md
 
+# Claude Code
+CLAUDE.md
+
+# Spec (local only)
+SPEC.md
+
+# Runbook instances (template is tracked; actual runbooks are site-specific)
+src/sre_agent/runbooks/*.md
+!src/sre_agent/runbooks/_template.md
+src/sre_agent/runbooks/scripts/
+
 # OS
 .DS_Store
 Thumbs.db

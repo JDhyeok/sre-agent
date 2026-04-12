@@ -439,6 +439,17 @@ def serve(
         console.print("[red]  Pipeline server requires uvicorn. Install with: pip install sre-agent[webhook][/red]")
         raise typer.Exit(1)
 
+    # Enable INFO-level output for sre_agent modules so the delivery log
+    # fallback (_log_card) and runbook execution logs actually reach stdout.
+    # uvicorn's log_level only affects its own loggers.
+    import logging as _logging
+    _logging.basicConfig(
+        level=_logging.INFO,
+        format="%(asctime)s %(levelname)-5s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    _logging.getLogger("sre_agent").setLevel(_logging.INFO)
+
     _load_env_file()
     settings = load_settings(config)
 

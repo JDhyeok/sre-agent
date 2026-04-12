@@ -39,7 +39,7 @@ dependencies = [
 
 [project.optional-dependencies]
 ssh = ["paramiko"]
-webhook = ["fastapi", "uvicorn", "jinja2"]
+webhook = ["fastapi", "uvicorn", "jinja2", "markdown"]
 all = ["sre-agent[ssh,webhook]"]
 dev = ["pytest", "pytest-asyncio", "ruff", "build", "twine"]
 

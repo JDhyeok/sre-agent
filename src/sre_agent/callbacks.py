@@ -1,7 +1,8 @@
-"""Callback handlers for displaying agent execution progress in the CLI."""
+"""Callback handlers for displaying agent execution progress in the CLI and pipeline server."""
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any, Callable
 
@@ -12,7 +13,7 @@ _AGENT_LABELS: dict[str, str] = {
     "ssh_agent": "SSH Diagnostics",
     "rca_agent": "Root Cause Analysis",
     "solution_agent": "Solution",
-    "operator_agent": "Operator",
+    "runbook_matcher_agent": "Runbook Matcher",
 }
 
 
@@ -94,3 +95,52 @@ class AgentProgressTracker:
 
     def get_tool_handler(self) -> Callable[..., None]:
         return self.tool_callback
+
+
+# ---------------------------------------------------------------------------
+# Logger-based progress tracker for the pipeline server (no Rich console)
+# ---------------------------------------------------------------------------
+
+
+class LoggingProgressTracker:
+    """Same protocol as ``AgentProgressTracker`` but emits to a Python logger.
+
+    Used by the pipeline server so the runbook_matcher_agent / data_collector
+    invocations are visible in server logs without depending on Rich.
+    """
+
+    def __init__(self, logger: logging.Logger, prefix: str = "") -> None:
+        self._logger = logger
+        self._prefix = prefix
+        self._seen: set[str] = set()
+
+    def set_prefix(self, prefix: str) -> None:
+        self._prefix = prefix
+        self._seen.clear()
+
+    def _orchestrator_callback(self, **kwargs: Any) -> None:
+        if "current_tool_use" not in kwargs:
+            return
+        tool = kwargs["current_tool_use"]
+        name = tool.get("name", "")
+        tid = tool.get("toolUseId", "")
+        if name and tid and tid not in self._seen:
+            self._seen.add(tid)
+            label = _AGENT_LABELS.get(name, name)
+            self._logger.info("%s→ %s", self._prefix, label)
+
+    def _tool_callback(self, **kwargs: Any) -> None:
+        if "current_tool_use" not in kwargs:
+            return
+        tool = kwargs["current_tool_use"]
+        name = tool.get("name", "")
+        tid = tool.get("toolUseId", "")
+        if name and tid and tid not in self._seen:
+            self._seen.add(tid)
+            self._logger.info("%s    ↳ %s", self._prefix, name)
+
+    def get_orchestrator_handler(self) -> Callable[..., None]:
+        return self._orchestrator_callback
+
+    def get_tool_handler(self) -> Callable[..., None]:
+        return self._tool_callback

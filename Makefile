@@ -1,4 +1,4 @@
-.PHONY: install install-dev build publish publish-test clean
+.PHONY: install install-all install-dev build publish publish-test clean lint format
 
 install:
 	pip install .
@@ -22,16 +22,10 @@ clean:
 	rm -rf dist/ build/ *.egg-info src/*.egg-info
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
-check:
-	sre-agent check
-
 lint:
-	ruff check src/ tests/
-	ruff format --check src/ tests/
+	ruff check src/
+	ruff format --check src/
 
 format:
-	ruff check --fix src/ tests/
-	ruff format src/ tests/
-
-test:
-	pytest tests/ -v
+	ruff check --fix src/
+	ruff format src/

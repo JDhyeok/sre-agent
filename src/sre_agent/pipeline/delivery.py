@@ -1,7 +1,10 @@
-"""Delivery module — Teams Incoming Webhook integration.
+"""Delivery module — Teams Incoming Webhook integration with log fallback.
 
-Sends incident notifications to Microsoft Teams channels via Incoming Webhooks.
-Uses MessageCard format for broad compatibility.
+Sends incident notifications to Microsoft Teams via Incoming Webhooks
+(MessageCard format). When no webhook URL is configured, the same payload
+is written to the application logger so the PoC remains testable without
+a Teams tenant — set ``delivery.teams_webhook_url`` in settings.yaml to
+switch over to real delivery.
 """
 
 from __future__ import annotations
@@ -16,11 +19,49 @@ logger = logging.getLogger(__name__)
 _client = httpx.Client(timeout=15.0)
 
 
+def _log_card(card: dict[str, Any]) -> None:
+    """Render a MessageCard to the log when Teams is not configured."""
+    summary = card.get("summary", "(no summary)")
+    sections = card.get("sections") or []
+    parts: list[str] = [f"[teams-disabled] {summary}"]
+
+    for section in sections:
+        title = section.get("activityTitle") or ""
+        subtitle = section.get("activitySubtitle") or ""
+        if title:
+            parts.append(f"  {title}")
+        if subtitle:
+            parts.append(f"    {subtitle}")
+        for fact in section.get("facts") or []:
+            parts.append(f"    - {fact.get('name', '')}: {fact.get('value', '')}")
+        text = section.get("text") or ""
+        if text:
+            parts.append("    ---")
+            for line in text.splitlines():
+                parts.append(f"    {line}")
+
+    actions = card.get("potentialAction") or []
+    if actions:
+        parts.append("  links:")
+        for action in actions:
+            name = action.get("name", "")
+            for target in action.get("targets") or []:
+                uri = target.get("uri", "")
+                parts.append(f"    - {name}: {uri}")
+
+    logger.info("\n".join(parts))
+
+
 def _post_card(webhook_url: str, card: dict[str, Any]) -> bool:
-    """Send a MessageCard to Teams. Returns True on success."""
+    """Send a MessageCard to Teams, or log it if no webhook URL is configured.
+
+    Returns True if the message was delivered (or successfully logged as a
+    fallback). Returns False only on a hard delivery error to a configured
+    webhook.
+    """
     if not webhook_url:
-        logger.warning("Teams webhook URL not configured — skipping notification")
-        return False
+        _log_card(card)
+        return True
     try:
         resp = _client.post(webhook_url, json=card)
         if resp.status_code == 200:
