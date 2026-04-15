@@ -61,6 +61,11 @@ class SSHHostConfig(BaseModel):
 class SSHConfig(BaseModel):
     timeout_seconds: int = 10
     hosts: list[SSHHostConfig] = Field(default_factory=list)
+    # SSH execution mode: invoke_shell (default) | exec_command | subprocess
+    # invoke_shell works in airgapped/restricted envs where exec_command returns EOF
+    ssh_mode: str = "invoke_shell"
+    pty_width: int = 220   # Wide PTY prevents line-wrapping in command output
+    pty_height: int = 50
 
 
 class ServiceNowConfig(BaseModel):

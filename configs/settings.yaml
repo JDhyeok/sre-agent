@@ -18,6 +18,14 @@ elasticsearch:
 
 ssh:
   timeout_seconds: 10
+  # SSH execution mode (also overridable via SSH_MODE env var):
+  #   invoke_shell  - PTY 기반 interactive shell + sentinel 완료 감지 (기본값)
+  #                   폐쇄망 / exec_command가 즉시 EOF를 반환하는 환경에서 사용
+  #   exec_command  - paramiko exec_command (단순, 보안 정책으로 차단될 수 있음)
+  #   subprocess    - 시스템 SSH 바이너리 (paramiko 불필요)
+  ssh_mode: "invoke_shell"
+  pty_width: 220    # 넓은 PTY로 출력 줄 바꿈(wrapping) 방지
+  pty_height: 50
   hosts: []
   # docker-compose.test.yaml + memory-leak-restart 런북 승인 실행 테스트:
   # 호스트에서 Docker를 쓰므로 SSH 대상을 로컬(또는 Docker 데몬이 있는 머신)로 두고
