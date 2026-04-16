@@ -22,7 +22,7 @@ class TestDefaultConfig:
         limits = AgentTokenLimits()
         assert limits.orchestrator == 8192
         assert limits.data_collector == 4096
-        assert limits.data_collector_max_tool_calls == 6
+        assert limits.data_collector_max_tool_calls == 12
         assert limits.ssh == 2048
         assert limits.rca == 8192
         assert limits.solution == 4096

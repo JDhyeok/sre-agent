@@ -32,7 +32,7 @@ class AgentTokenLimits(BaseModel):
 
     orchestrator: int = 8192
     data_collector: int = 4096
-    data_collector_max_tool_calls: int = 6
+    data_collector_max_tool_calls: int = 12
     ssh: int = 2048
     rca: int = 8192
     solution: int = 4096

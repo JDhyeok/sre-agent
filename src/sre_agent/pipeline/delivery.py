@@ -123,10 +123,17 @@ def send_report(
     server_base_url: str = "",
 ) -> bool:
     """Send the final analysis report to Teams."""
-    if len(report) > 5000:
-        report_truncated = report[:4800] + "\n\n... (리포트가 잘림. 전체 내용은 웹 UI에서 확인)"
+    # Strip visualization JSON blocks before sending to Teams/log
+    import re as _re
+    clean_report = report
+    for _tag in ("visualization_json", "metrics_json"):
+        clean_report = _re.sub(rf"```{_tag}\s*\n.*?```", "", clean_report, flags=_re.DOTALL)
+    clean_report = _re.sub(r"###\s*시각화 데이터\s*\n\s*\n?", "", clean_report).strip()
+
+    if len(clean_report) > 5000:
+        report_truncated = clean_report[:4800] + "\n\n... (리포트가 잘림. 전체 내용은 웹 UI에서 확인)"
     else:
-        report_truncated = report
+        report_truncated = clean_report
 
     theme = "FF0000" if "critical" in report.lower() else "00CC00"
 

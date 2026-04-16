@@ -50,6 +50,20 @@ def _extract_visualization_json(report: str) -> str:
     return ""
 
 
+def _strip_visualization_block(report: str) -> str:
+    """Remove visualization_json / metrics_json code blocks from the report text.
+
+    These blocks are consumed by the chart renderer and should not appear
+    as raw text in the report display.
+    """
+    result = report
+    for tag in ("visualization_json", "metrics_json"):
+        result = re.sub(rf"```{tag}\s*\n.*?```", "", result, flags=re.DOTALL)
+    # Also remove the "### 시각화 데이터" header if the block was the only content
+    result = re.sub(r"###\s*시각화 데이터\s*\n\s*\n?", "", result)
+    return result.strip()
+
+
 def register_approval_routes(
     app, incidents: dict, settings: Settings, lock,
     rca_callback=None,
@@ -112,16 +126,19 @@ def register_approval_routes(
                 "report": report_md,
             })
 
+        # Strip visualization blocks before rendering (they're consumed by the chart JS)
+        report_display = _strip_visualization_block(report_md)
+
         # Render the report as HTML so the user does not see raw markdown.
-        if _md is not None and report_md:
+        if _md is not None and report_display:
             _md.reset()
-            report_html = _md.convert(report_md)
+            report_html = _md.convert(report_display)
         else:
             report_html = ""
 
         # Stripped report body (for the case when markdown lib is missing —
         # at least drop the marker characters so the page is readable).
-        report_plain = _strip_markdown_markers(report_md)
+        report_plain = _strip_markdown_markers(report_display)
 
         # Build the "what will run" panel from the runbook matcher's verdict.
         runbook_view = _build_runbook_view(report_md)

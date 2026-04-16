@@ -4,6 +4,7 @@ import pytest
 
 from sre_agent.pipeline.approval import (
     _extract_visualization_json,
+    _strip_visualization_block,
     _extract_runbook_name,
     _extract_section,
     _extract_what,
@@ -160,6 +161,27 @@ class TestExtractVisualizationJson:
         parsed = json.loads(result)
         assert parsed["processes"][0]["name"] == "java"
         assert parsed["logs"]["total_errors"] == 10
+
+
+class TestStripVisualizationBlock:
+    def test_strips_visualization_json(self):
+        report = "### 현재 상황\n내용\n\n### 시각화 데이터\n```visualization_json\n{}\n```\n\n### 런북"
+        result = _strip_visualization_block(report)
+        assert "visualization_json" not in result
+        assert "시각화 데이터" not in result
+        assert "현재 상황" in result
+        assert "런북" in result
+
+    def test_strips_legacy_metrics_json(self):
+        report = "내용\n```metrics_json\n[]\n```\n뒤 내용"
+        result = _strip_visualization_block(report)
+        assert "metrics_json" not in result
+        assert "뒤 내용" in result
+
+    def test_no_block_returns_unchanged(self):
+        report = "### 현재 상황\n평범한 리포트"
+        result = _strip_visualization_block(report)
+        assert result == report
 
 
 # ---------------------------------------------------------------------------
