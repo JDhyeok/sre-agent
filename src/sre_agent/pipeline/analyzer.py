@@ -1,4 +1,4 @@
-"""Analyzer module — Orchestrator invocation with severity-based analysis levels."""
+"""Analyzer module — Two-phase pipeline: Phase A (auto) + Phase B (on-demand)."""
 
 from __future__ import annotations
 
@@ -22,32 +22,51 @@ class AnalysisResult:
     elapsed_seconds: float
     status: str = "completed"  # completed | failed | skipped
     error: str = ""
+    collected_data: str = ""  # Raw data collection output for Phase B reuse
 
 
 class PipelineAnalyzer:
-    """Runs analysis on an IncidentRequest using the appropriate depth level."""
+    """Two-phase analyzer: Phase A (data + runbook) runs automatically,
+    Phase B (RCA + solution) runs on demand."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._orchestrator = None
+        self._phase_a = None
+        self._phase_b = None
         from sre_agent.callbacks import LoggingProgressTracker
         self._tracker = LoggingProgressTracker(logger)
 
-    def _get_orchestrator(self):
-        """Lazy-init the full orchestrator (expensive — MCP subprocesses)."""
-        if self._orchestrator is None:
-            from sre_agent.agents.orchestrator import create_orchestrator
-            self._orchestrator = create_orchestrator(
+    def _get_phase_a(self):
+        """Lazy-init Phase A orchestrator (data collector + runbook matcher)."""
+        if self._phase_a is None:
+            from sre_agent.agents.phase_a_orchestrator import create_phase_a_orchestrator
+            self._phase_a = create_phase_a_orchestrator(
                 self._settings,
                 callback_handler=self._tracker.get_orchestrator_handler(),
                 tool_callback_handler=self._tracker.get_tool_handler(),
             )
-        return self._orchestrator
+        return self._phase_a
 
-    def analyze(self, request: IncidentRequest) -> AnalysisResult:
-        """Run the appropriate analysis based on the incident's analysis level."""
+    def _get_phase_b(self):
+        """Lazy-init Phase B orchestrator (RCA + solution). Only created on demand."""
+        if self._phase_b is None:
+            from sre_agent.agents.phase_b_orchestrator import create_phase_b_orchestrator
+            self._phase_b = create_phase_b_orchestrator(
+                self._settings,
+                callback_handler=self._tracker.get_orchestrator_handler(),
+                tool_callback_handler=self._tracker.get_tool_handler(),
+            )
+        return self._phase_b
+
+    # -- Phase A: automatic data collection + runbook matching -----------------
+
+    def analyze_phase_a(self, request: IncidentRequest) -> AnalysisResult:
+        """Phase A: collect observability data and match runbooks.
+
+        This runs automatically for every incident. Does NOT perform RCA.
+        """
         logger.info(
-            "Analyzing %s (level=%s, alerts=%d)",
+            "Phase A: analyzing %s (level=%s, alerts=%d)",
             request.incident_id, request.analysis_level.value, len(request.alerts),
         )
 
@@ -59,16 +78,14 @@ class PipelineAnalyzer:
 
         start = time.time()
         context = request.format_context()
-
         self._tracker.set_prefix(f"[{request.incident_id}] ")
 
         try:
-            if request.analysis_level == AnalysisLevel.LIGHTWEIGHT:
-                result = self._run_lightweight(context)
-            else:
-                result = self._run_full(context)
+            orchestrator = self._get_phase_a()
+            prompt = self._build_phase_a_prompt(context)
+            result = orchestrator(prompt)
         except Exception as e:
-            logger.exception("Analysis failed for %s", request.incident_id)
+            logger.exception("Phase A failed for %s", request.incident_id)
             return AnalysisResult(
                 incident_id=request.incident_id,
                 report="",
@@ -81,25 +98,53 @@ class PipelineAnalyzer:
         elapsed = time.time() - start
         report = str(result)
 
-        logger.info("Analysis completed for %s in %.1fs", request.incident_id, elapsed)
+        logger.info("Phase A completed for %s in %.1fs", request.incident_id, elapsed)
         return AnalysisResult(
             incident_id=request.incident_id,
             report=report,
             analysis_level=request.analysis_level,
             elapsed_seconds=elapsed,
+            collected_data=report,  # Preserve for Phase B
         )
 
-    def _run_full(self, context: str):
-        """Full analysis with all agents."""
-        orchestrator = self._get_orchestrator()
-        prompt = self._build_prompt(context, full=True)
-        return orchestrator(prompt)
+    # -- Phase B: on-demand RCA + solution ------------------------------------
 
-    def _run_lightweight(self, context: str):
-        """Lightweight: quick data check. Escalates to full if anomalies found."""
-        orchestrator = self._get_orchestrator()
-        prompt = self._build_prompt(context, full=False)
-        return orchestrator(prompt)
+    def analyze_phase_b(self, incident_id: str, collected_data: str) -> AnalysisResult:
+        """Phase B: run RCA + solution on previously collected data.
+
+        Only called when user clicks "RCA 진행".
+        """
+        logger.info("Phase B: RCA for %s", incident_id)
+        start = time.time()
+        self._tracker.set_prefix(f"[{incident_id}] ")
+
+        try:
+            orchestrator = self._get_phase_b()
+            prompt = self._build_phase_b_prompt(collected_data)
+            result = orchestrator(prompt)
+        except Exception as e:
+            logger.exception("Phase B failed for %s", incident_id)
+            return AnalysisResult(
+                incident_id=incident_id,
+                report="",
+                analysis_level=AnalysisLevel.FULL_ANALYSIS,
+                elapsed_seconds=time.time() - start,
+                status="failed",
+                error=str(e),
+            )
+
+        elapsed = time.time() - start
+        report = str(result)
+
+        logger.info("Phase B (RCA) completed for %s in %.1fs", incident_id, elapsed)
+        return AnalysisResult(
+            incident_id=incident_id,
+            report=report,
+            analysis_level=AnalysisLevel.FULL_ANALYSIS,
+            elapsed_seconds=elapsed,
+        )
+
+    # -- Skip handlers (unchanged from v0.1) -----------------------------------
 
     def _handle_log_only(self, request: IncidentRequest) -> AnalysisResult:
         report = (
@@ -137,27 +182,22 @@ class PipelineAnalyzer:
             status="skipped",
         )
 
-    @staticmethod
-    def _build_prompt(context: str, *, full: bool) -> str:
-        parts = []
-        if full:
-            parts.append(
-                "Investigate the following incident and produce a complete RCA report. "
-                "Follow the full investigation workflow: data_collector_agent → "
-                "(ssh_agent if needed) → rca_agent → solution_agent → "
-                "**runbook_matcher_agent**. "
-                "You MUST call runbook_matcher_agent after solution_agent and "
-                "include its verbatim output (the '## Runbook Match' block with "
-                "either MATCH_FOUND or NO_MATCH) in your final report under the "
-                "'### 자동 조치' section. Do NOT paraphrase the matcher's output."
-            )
-        else:
-            parts.append(
-                "Perform a quick health check for the following alert. "
-                "Use ONLY the Data Collector agent for a rapid assessment. "
-                "If you detect anomalies that warrant deeper investigation, "
-                "proceed with full RCA AND call runbook_matcher_agent at the end."
-            )
+    # -- Prompt builders -------------------------------------------------------
 
-        parts.append(f"\n\n## Current Incident\n{context}")
-        return "\n".join(parts)
+    @staticmethod
+    def _build_phase_a_prompt(context: str) -> str:
+        return (
+            "다음 인시던트에 대해 데이터를 수집하고 런북을 매칭하세요.\n"
+            "data_collector_agent로 데이터를 수집한 후, "
+            "runbook_matcher_agent로 적합한 런북을 찾으세요.\n\n"
+            f"## 현재 인시던트\n{context}"
+        )
+
+    @staticmethod
+    def _build_phase_b_prompt(collected_data: str) -> str:
+        return (
+            "아래는 Phase A에서 수집된 관측성 데이터입니다. "
+            "이 데이터를 기반으로 근본 원인을 분석하고 조치 방안을 제안하세요.\n"
+            "rca_agent를 먼저 호출한 후, solution_agent를 호출하세요.\n\n"
+            f"## 수집된 데이터\n{collected_data}"
+        )
