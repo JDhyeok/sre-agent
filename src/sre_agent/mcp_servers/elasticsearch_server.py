@@ -7,12 +7,16 @@ and timeline aggregation.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from collections import Counter
 
 import httpx
 from fastmcp import FastMCP
+
+_log = logging.getLogger("sre_agent.mcp.elasticsearch")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 
 ELASTICSEARCH_URL = os.environ.get("ELASTICSEARCH_URL", "http://localhost:9200")
 DEFAULT_INDEX = os.environ.get("ELASTICSEARCH_DEFAULT_INDEX", "app-logs-*")
@@ -68,6 +72,7 @@ def search_logs(
     """
     target_index = index or DEFAULT_INDEX
     max_results = min(max_results, MAX_RESULTS)
+    _log.info("search_logs: query=%r index=%s range=%dm level=%s service=%s", query, target_index, time_range_minutes, log_level, service)
 
     must_clauses: list[dict] = []
     must_clauses.append({"range": {"@timestamp": {"gte": f"now-{time_range_minutes}m", "lte": "now"}}})
@@ -134,6 +139,7 @@ def get_error_patterns(
         JSON with error patterns sorted by frequency, including sample messages.
     """
     target_index = index or DEFAULT_INDEX
+    _log.info("get_error_patterns: index=%s range=%dm service=%s", target_index, time_range_minutes, service)
 
     must_clauses: list[dict] = [
         {"range": {"@timestamp": {"gte": f"now-{time_range_minutes}m", "lte": "now"}}},
@@ -219,6 +225,7 @@ def get_log_timeline(
         JSON with time-bucketed log counts showing trends.
     """
     target_index = index or DEFAULT_INDEX
+    _log.info("get_log_timeline: index=%s range=%dm interval=%s level=%s service=%s", target_index, time_range_minutes, interval, log_level, service)
 
     must_clauses: list[dict] = [
         {"range": {"@timestamp": {"gte": f"now-{time_range_minutes}m", "lte": "now"}}},
@@ -297,6 +304,7 @@ def get_field_aggregation(
         JSON with top values for the specified field and their counts.
     """
     target_index = index or DEFAULT_INDEX
+    _log.info("get_field_aggregation: field=%s index=%s range=%dm level=%s", field, target_index, time_range_minutes, log_level)
 
     must_clauses: list[dict] = [
         {"range": {"@timestamp": {"gte": f"now-{time_range_minutes}m", "lte": "now"}}},
@@ -371,6 +379,7 @@ def batch_search(queries: str) -> str:
     Returns:
         JSON with an array of results, one per input query, in the same order.
     """
+    _log.info("batch_search: %s", queries)
     try:
         query_list = json.loads(queries)
     except (json.JSONDecodeError, TypeError) as e:

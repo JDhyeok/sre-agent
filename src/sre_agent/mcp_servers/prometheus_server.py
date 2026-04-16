@@ -7,6 +7,7 @@ comparison and anomaly severity classification.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import statistics
 import time
@@ -20,6 +21,8 @@ BASELINE_WINDOW_HOURS = int(os.environ.get("PROMETHEUS_BASELINE_HOURS", "24"))
 
 mcp = FastMCP("Prometheus Observability Server")
 _client = httpx.Client(timeout=30.0)
+_log = logging.getLogger("sre_agent.mcp.prometheus")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 
 
 def _classify_severity(deviation_percent: float) -> str:
@@ -55,6 +58,7 @@ def query_instant(query: str) -> str:
     Returns:
         JSON with query results including metric name, labels, and current value.
     """
+    _log.info("query_instant: %s", query)
     try:
         data = _prom_query("/api/v1/query", {"query": query, "time": time.time()})
         results = data.get("data", {}).get("result", [])
@@ -88,6 +92,7 @@ def query_range(query: str, duration_minutes: int = 60, step: str = "60s") -> st
         JSON with current values, baseline comparison, deviation percentage,
         and severity classification (critical/warning/info/normal).
     """
+    _log.info("query_range: %s (duration=%dm, step=%s)", query, duration_minutes, step)
     try:
         now = time.time()
         start = now - (duration_minutes * 60)
@@ -159,6 +164,7 @@ def get_active_alerts() -> str:
         JSON with list of active alerts including name, severity, labels,
         annotations, and duration.
     """
+    _log.info("get_active_alerts")
     try:
         data = _alertmanager_query("/api/v2/alerts")
 
@@ -189,6 +195,7 @@ def get_targets_health() -> str:
         JSON with target health information grouped by job, including
         any targets that are down.
     """
+    _log.info("get_targets_health")
     try:
         data = _prom_query("/api/v1/targets", {})
         active = data.get("data", {}).get("activeTargets", [])
@@ -246,6 +253,7 @@ def batch_query(queries: str) -> str:
     Returns:
         JSON with an array of results, one per input query, in the same order.
     """
+    _log.info("batch_query: %s", queries)
     try:
         query_list = json.loads(queries)
     except (json.JSONDecodeError, TypeError) as e:
