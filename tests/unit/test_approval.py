@@ -164,13 +164,32 @@ class TestExtractVisualizationJson:
 
 
 class TestStripVisualizationBlock:
-    def test_strips_visualization_json(self):
-        report = "### 현재 상황\n내용\n\n### 시각화 데이터\n```visualization_json\n{}\n```\n\n### 런북"
+    def test_strips_section_with_json(self):
+        report = "### 현재 상황\n내용\n\n### 시각화 데이터\n\n```visualization_json\n{\"charts\":[]}\n```\n\n### 런북 매칭 결과"
         result = _strip_visualization_block(report)
         assert "visualization_json" not in result
         assert "시각화 데이터" not in result
         assert "현재 상황" in result
-        assert "런북" in result
+        assert "런북 매칭 결과" in result
+
+    def test_strips_multiline_json(self):
+        report = (
+            "### 수집 데이터 요약\n메트릭 내용\n\n"
+            "### 시각화 데이터\n\n"
+            "```visualization_json\n"
+            "{\n"
+            '  "charts": [\n'
+            '    {"label": "CPU", "data": [{"t": "2026-04-16T03:00:00Z", "v": 55}]}\n'
+            "  ]\n"
+            "}\n"
+            "```\n\n"
+            "### 런북 매칭 결과\n매칭 내용"
+        )
+        result = _strip_visualization_block(report)
+        assert "charts" not in result
+        assert "visualization_json" not in result
+        assert "수집 데이터 요약" in result
+        assert "런북 매칭 결과" in result
 
     def test_strips_legacy_metrics_json(self):
         report = "내용\n```metrics_json\n[]\n```\n뒤 내용"
@@ -178,10 +197,21 @@ class TestStripVisualizationBlock:
         assert "metrics_json" not in result
         assert "뒤 내용" in result
 
+    def test_strips_with_spaces_around_tag(self):
+        report = "앞\n``` visualization_json\n{}\n```\n뒤"
+        result = _strip_visualization_block(report)
+        assert "visualization_json" not in result
+
     def test_no_block_returns_unchanged(self):
         report = "### 현재 상황\n평범한 리포트"
         result = _strip_visualization_block(report)
         assert result == report
+
+    def test_section_at_end_of_report(self):
+        report = "### 현재 상황\n내용\n\n### 시각화 데이터\n```visualization_json\n{}\n```"
+        result = _strip_visualization_block(report)
+        assert "visualization_json" not in result
+        assert "현재 상황" in result
 
 
 # ---------------------------------------------------------------------------

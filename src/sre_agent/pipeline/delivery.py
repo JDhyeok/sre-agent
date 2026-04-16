@@ -125,10 +125,12 @@ def send_report(
     """Send the final analysis report to Teams."""
     # Strip visualization JSON blocks before sending to Teams/log
     import re as _re
-    clean_report = report
+    clean_report = _re.sub(
+        r"###\s*시각화\s*데이터.*?(?=\n###\s|\Z)", "", report, flags=_re.DOTALL,
+    )
     for _tag in ("visualization_json", "metrics_json"):
-        clean_report = _re.sub(rf"```{_tag}\s*\n.*?```", "", clean_report, flags=_re.DOTALL)
-    clean_report = _re.sub(r"###\s*시각화 데이터\s*\n\s*\n?", "", clean_report).strip()
+        clean_report = _re.sub(rf"```\s*{_tag}.*?```", "", clean_report, flags=_re.DOTALL)
+    clean_report = clean_report.strip()
 
     if len(clean_report) > 5000:
         report_truncated = clean_report[:4800] + "\n\n... (리포트가 잘림. 전체 내용은 웹 UI에서 확인)"

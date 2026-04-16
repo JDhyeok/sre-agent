@@ -51,16 +51,22 @@ def _extract_visualization_json(report: str) -> str:
 
 
 def _strip_visualization_block(report: str) -> str:
-    """Remove visualization_json / metrics_json code blocks from the report text.
+    """Remove visualization_json / metrics_json blocks from the report text.
 
     These blocks are consumed by the chart renderer and should not appear
-    as raw text in the report display.
+    as raw text in the report display. Uses two strategies for robustness:
+    1. Remove the entire "시각화 데이터" section (header through next heading)
+    2. Remove any standalone code blocks as fallback
     """
     result = report
+    # Strategy 1: Remove the entire section from header to next ### heading
+    result = re.sub(
+        r"###\s*시각화\s*데이터.*?(?=\n###\s|\Z)",
+        "", result, flags=re.DOTALL,
+    )
+    # Strategy 2: Remove standalone code blocks (fallback if no section header)
     for tag in ("visualization_json", "metrics_json"):
-        result = re.sub(rf"```{tag}\s*\n.*?```", "", result, flags=re.DOTALL)
-    # Also remove the "### 시각화 데이터" header if the block was the only content
-    result = re.sub(r"###\s*시각화 데이터\s*\n\s*\n?", "", result)
+        result = re.sub(rf"```\s*{tag}.*?```", "", result, flags=re.DOTALL)
     return result.strip()
 
 
