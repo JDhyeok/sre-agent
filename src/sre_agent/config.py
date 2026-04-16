@@ -68,6 +68,12 @@ class ServiceNowConfig(BaseModel):
     instance_url: str = ""
 
 
+class HmgApmConfig(BaseModel):
+    url: str = ""
+    api_key: str = ""
+    timeout_seconds: int = 30
+
+
 class IntakeConfig(BaseModel):
     dedup_window_minutes: int = 5
     group_window_seconds: int = 60
@@ -96,6 +102,7 @@ class MCPServersConfig(BaseModel):
     elasticsearch: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
     ssh: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
     servicenow_cmdb: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
+    hmg_apm: MCPTransportConfig = Field(default_factory=MCPTransportConfig)
 
 
 class Settings(BaseSettings):
@@ -105,6 +112,7 @@ class Settings(BaseSettings):
     elasticsearch: ElasticsearchConfig = Field(default_factory=ElasticsearchConfig)
     ssh: SSHConfig = Field(default_factory=SSHConfig)
     servicenow: ServiceNowConfig = Field(default_factory=ServiceNowConfig)
+    hmg_apm: HmgApmConfig = Field(default_factory=HmgApmConfig)
     intake: IntakeConfig = Field(default_factory=IntakeConfig)
     delivery: DeliveryConfig = Field(default_factory=DeliveryConfig)
     mcp_servers: MCPServersConfig = Field(default_factory=MCPServersConfig)

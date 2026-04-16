@@ -49,6 +49,16 @@ def _format_tool_detail(tool_name: str, tool_input: dict) -> str:
         s = tool_input.get("service", "")
         return f"  host={h} service={s}"
 
+    # APM tools
+    if tool_name == "get_apm_objects":
+        return ""
+    if tool_name in ("get_active_services", "get_xlog_data", "get_thread_dump"):
+        obj = tool_input.get("object_id", "")
+        return f"  object_id={obj}" if obj else ""
+    if tool_name == "batch_apm_query":
+        q = tool_input.get("queries", "")
+        return f"  queries={q[:200]}" if q else ""
+
     # SSH exec (ssh_agent)
     if tool_name == "exec_command":
         h = tool_input.get("hostname", "")

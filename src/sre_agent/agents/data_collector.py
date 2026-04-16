@@ -26,6 +26,7 @@ _PROMETHEUS_SCRIPT = str(_MCP_DIR / "prometheus_server.py")
 _ELASTICSEARCH_SCRIPT = str(_MCP_DIR / "elasticsearch_server.py")
 _CMDB_SCRIPT = str(_MCP_DIR / "servicenow_cmdb_server.py")
 _SSH_DIAGNOSTIC_SCRIPT = str(_MCP_DIR / "ssh_diagnostic_server.py")
+_APM_SCRIPT = str(_MCP_DIR / "apm_server.py")
 
 _FASTMCP_QUIET: dict[str, str] = {
     "FASTMCP_SHOW_SERVER_BANNER": "false",
@@ -42,7 +43,10 @@ def create_data_collector_agent(
     model = create_model(settings.anthropic, max_tokens=settings.agent_tokens.data_collector)
     max_tool_calls = settings.agent_tokens.data_collector_max_tool_calls
     has_ssh_hosts = bool(settings.ssh.hosts)
-    system_prompt = build_system_prompt(max_tool_calls=max_tool_calls, ssh_enabled=has_ssh_hosts)
+    has_apm = bool(settings.hmg_apm.url)
+    system_prompt = build_system_prompt(
+        max_tool_calls=max_tool_calls, ssh_enabled=has_ssh_hosts, apm_enabled=has_apm,
+    )
 
     prometheus_mcp = MCPClient(lambda: stdio_client(
         StdioServerParameters(
@@ -98,6 +102,21 @@ def create_data_collector_agent(
             )
         ))
         tools.append(ssh_diag_mcp)
+
+    if has_apm:
+        apm_mcp = MCPClient(lambda: stdio_client(
+            StdioServerParameters(
+                command=sys.executable,
+                args=[_APM_SCRIPT],
+                env={
+                    **_FASTMCP_QUIET,
+                    "HMG_APM_URL": settings.hmg_apm.url,
+                    "HMG_APM_API_KEY": settings.hmg_apm.api_key,
+                    "HMG_APM_TIMEOUT": str(settings.hmg_apm.timeout_seconds),
+                },
+            )
+        ))
+        tools.append(apm_mcp)
 
     return Agent(
         model=model,

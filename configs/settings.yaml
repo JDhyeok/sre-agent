@@ -38,6 +38,12 @@ ssh:
 
 servicenow:
   instance_url: ""
+
+# HMG-APM (Scouter 기반 APM)
+hmg_apm:
+  url: ""              # 예: "http://scouter-server:6180"
+  api_key: ""
+  timeout_seconds: 30
   # 인증은 환경변수로 설정:
   # export SERVICENOW_API_TOKEN="your-token"
   # 또는
