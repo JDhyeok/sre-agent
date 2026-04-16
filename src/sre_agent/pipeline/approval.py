@@ -27,6 +27,24 @@ _RUNBOOK_DIR = Path(__file__).resolve().parent.parent / "runbooks"
 _APPROVAL_TIMEOUT_MINUTES = 10
 
 
+def _extract_metrics_json(report: str) -> str:
+    """Extract metrics_json code block from the report for chart rendering.
+
+    Returns the raw JSON string, or empty string if not found.
+    """
+    match = re.search(r"```metrics_json\s*\n(.*?)```", report, re.DOTALL)
+    if not match:
+        return ""
+    raw = match.group(1).strip()
+    # Validate it's parseable JSON
+    try:
+        import json
+        json.loads(raw)
+        return raw
+    except (json.JSONDecodeError, ValueError):
+        return ""
+
+
 def register_approval_routes(
     app, incidents: dict, settings: Settings, lock,
     rca_callback=None,
@@ -114,6 +132,9 @@ def register_approval_routes(
             except Exception:
                 rca_report_html = _strip_markdown_markers(rca_report_md)
 
+        # Extract chart data from report
+        metrics_json = _extract_metrics_json(report_md)
+
         template = _jinja_env.get_template("approval.html")
         html = template.render(
             incident_id=incident_id,
@@ -127,6 +148,7 @@ def register_approval_routes(
             phase=phase,
             rca_report_html=rca_report_html,
             rca_callback_available=(rca_callback is not None),
+            metrics_json=metrics_json,
         )
         return HTMLResponse(html)
 

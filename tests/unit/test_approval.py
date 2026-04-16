@@ -3,6 +3,7 @@
 import pytest
 
 from sre_agent.pipeline.approval import (
+    _extract_metrics_json,
     _extract_runbook_name,
     _extract_section,
     _extract_what,
@@ -118,6 +119,44 @@ class TestParseNoMatch:
         report = "**사유**: 이유 없음."
         result = _parse_no_match(report)
         assert result["alternatives"] == []
+
+
+# ---------------------------------------------------------------------------
+# _build_runbook_view
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# _extract_metrics_json
+# ---------------------------------------------------------------------------
+
+class TestExtractMetricsJson:
+    def test_valid_metrics_block(self):
+        report = '### 시각화 데이터\n```metrics_json\n[{"label": "CPU", "data": [{"t": "2026-04-16T03:00:00Z", "v": 55.2}]}]\n```\n'
+        result = _extract_metrics_json(report)
+        assert '"CPU"' in result
+        assert "55.2" in result
+
+    def test_no_metrics_block(self):
+        report = "Just a regular report without charts."
+        result = _extract_metrics_json(report)
+        assert result == ""
+
+    def test_invalid_json_returns_empty(self):
+        report = '```metrics_json\n{not valid json}\n```'
+        result = _extract_metrics_json(report)
+        assert result == ""
+
+    def test_multiline_json(self):
+        report = '```metrics_json\n[\n  {\n    "label": "Memory",\n    "data": [\n      {"t": "2026-04-16T03:00:00Z", "v": 80.5},\n      {"t": "2026-04-16T03:05:00Z", "v": 85.1}\n    ]\n  }\n]\n```'
+        result = _extract_metrics_json(report)
+        assert '"Memory"' in result
+        assert "80.5" in result
+        assert "85.1" in result
+
+    def test_empty_array(self):
+        report = '```metrics_json\n[]\n```'
+        result = _extract_metrics_json(report)
+        assert result == "[]"
 
 
 # ---------------------------------------------------------------------------
