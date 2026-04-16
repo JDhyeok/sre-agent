@@ -48,17 +48,8 @@ def _alertmanager_query(endpoint: str) -> dict:
     return resp.json()
 
 
-@mcp.tool()
-def query_instant(query: str) -> str:
-    """Execute a PromQL instant query and return current metric values.
-
-    Args:
-        query: A valid PromQL expression (e.g. 'up', 'rate(http_requests_total[5m])')
-
-    Returns:
-        JSON with query results including metric name, labels, and current value.
-    """
-    _log.info("query_instant: %s", query)
+def _do_instant_query(query: str) -> str:
+    """Internal: execute an instant PromQL query and return JSON string."""
     try:
         data = _prom_query("/api/v1/query", {"query": query, "time": time.time()})
         results = data.get("data", {}).get("result", [])
@@ -76,23 +67,8 @@ def query_instant(query: str) -> str:
         return json.dumps({"status": "error", "query": query, "error": str(e)})
 
 
-@mcp.tool()
-def query_range(query: str, duration_minutes: int = 60, step: str = "60s") -> str:
-    """Execute a PromQL range query with automatic baseline comparison.
-
-    Queries the metric for the specified duration, computes a baseline from the
-    past 24 hours, and classifies anomaly severity.
-
-    Args:
-        query: A valid PromQL expression
-        duration_minutes: How many minutes of recent data to query (default: 60)
-        step: Query resolution step (default: '60s')
-
-    Returns:
-        JSON with current values, baseline comparison, deviation percentage,
-        and severity classification (critical/warning/info/normal).
-    """
-    _log.info("query_range: %s (duration=%dm, step=%s)", query, duration_minutes, step)
+def _do_range_query(query: str, duration_minutes: int = 60, step: str = "60s") -> str:
+    """Internal: execute a range PromQL query with baseline comparison and return JSON string."""
     try:
         now = time.time()
         start = now - (duration_minutes * 60)
@@ -143,6 +119,40 @@ def query_range(query: str, duration_minutes: int = 60, step: str = "60s") -> st
         return json.dumps({"status": "success", "query": query, "duration_minutes": duration_minutes, "results": results})
     except httpx.HTTPError as e:
         return json.dumps({"status": "error", "query": query, "error": str(e)})
+
+
+@mcp.tool()
+def query_instant(query: str) -> str:
+    """Execute a PromQL instant query and return current metric values.
+
+    Args:
+        query: A valid PromQL expression (e.g. 'up', 'rate(http_requests_total[5m])')
+
+    Returns:
+        JSON with query results including metric name, labels, and current value.
+    """
+    _log.info("query_instant: %s", query)
+    return _do_instant_query(query)
+
+
+@mcp.tool()
+def query_range(query: str, duration_minutes: int = 60, step: str = "60s") -> str:
+    """Execute a PromQL range query with automatic baseline comparison.
+
+    Queries the metric for the specified duration, computes a baseline from the
+    past 24 hours, and classifies anomaly severity.
+
+    Args:
+        query: A valid PromQL expression
+        duration_minutes: How many minutes of recent data to query (default: 60)
+        step: Query resolution step (default: '60s')
+
+    Returns:
+        JSON with current values, baseline comparison, deviation percentage,
+        and severity classification (critical/warning/info/normal).
+    """
+    _log.info("query_range: %s (duration=%dm, step=%s)", query, duration_minutes, step)
+    return _do_range_query(query, duration_minutes, step)
 
 
 def _interpret_deviation(query: str, deviation: float, severity: str, current: float, baseline: float) -> str:
@@ -271,13 +281,13 @@ def batch_query(queries: str) -> str:
 
         qtype = q.get("type", "instant")
         if qtype == "range":
-            result = json.loads(query_range(
+            result = json.loads(_do_range_query(
                 expr,
                 q.get("duration_minutes", 60),
                 q.get("step", "60s"),
             ))
         else:
-            result = json.loads(query_instant(expr))
+            result = json.loads(_do_instant_query(expr))
         results.append(result)
 
     return json.dumps({

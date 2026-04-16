@@ -48,31 +48,17 @@ def _templatize_message(message: str) -> str:
     return result.strip()
 
 
-@mcp.tool()
-def search_logs(
-    query: str,
+def _do_search_logs(
+    query: str = "",
     index: str = "",
     time_range_minutes: int = 60,
     log_level: str = "",
     service: str = "",
     max_results: int = 100,
 ) -> str:
-    """Search Elasticsearch logs with filters.
-
-    Args:
-        query: Search query string (Lucene query syntax)
-        index: Elasticsearch index pattern (default: configured default)
-        time_range_minutes: How far back to search in minutes (default: 60)
-        log_level: Filter by log level (e.g. 'error', 'warn', 'info')
-        service: Filter by service name
-        max_results: Maximum number of log entries to return (default: 100, max: 500)
-
-    Returns:
-        JSON with matching log entries and hit count.
-    """
+    """Internal: search logs and return JSON string."""
     target_index = index or DEFAULT_INDEX
     max_results = min(max_results, MAX_RESULTS)
-    _log.info("search_logs: query=%r index=%s range=%dm level=%s service=%s", query, target_index, time_range_minutes, log_level, service)
 
     must_clauses: list[dict] = []
     must_clauses.append({"range": {"@timestamp": {"gte": f"now-{time_range_minutes}m", "lte": "now"}}})
@@ -118,28 +104,39 @@ def search_logs(
 
 
 @mcp.tool()
-def get_error_patterns(
+def search_logs(
+    query: str,
+    index: str = "",
+    time_range_minutes: int = 60,
+    log_level: str = "",
+    service: str = "",
+    max_results: int = 100,
+) -> str:
+    """Search Elasticsearch logs with filters.
+
+    Args:
+        query: Search query string (Lucene query syntax)
+        index: Elasticsearch index pattern (default: configured default)
+        time_range_minutes: How far back to search in minutes (default: 60)
+        log_level: Filter by log level (e.g. 'error', 'warn', 'info')
+        service: Filter by service name
+        max_results: Maximum number of log entries to return (default: 100, max: 500)
+
+    Returns:
+        JSON with matching log entries and hit count.
+    """
+    _log.info("search_logs: query=%r index=%s range=%dm level=%s service=%s", query, index or DEFAULT_INDEX, time_range_minutes, log_level, service)
+    return _do_search_logs(query, index, time_range_minutes, log_level, service, max_results)
+
+
+def _do_error_patterns(
     index: str = "",
     time_range_minutes: int = 60,
     service: str = "",
     top_n: int = 10,
 ) -> str:
-    """Extract and group error log patterns by frequency.
-
-    Normalizes log messages by replacing variable parts (UUIDs, IPs, timestamps, numbers)
-    with placeholders, then groups by template to find the most common error patterns.
-
-    Args:
-        index: Elasticsearch index pattern (default: configured default)
-        time_range_minutes: How far back to search in minutes (default: 60)
-        service: Filter by service name
-        top_n: Number of top patterns to return (default: 10)
-
-    Returns:
-        JSON with error patterns sorted by frequency, including sample messages.
-    """
+    """Internal: extract error patterns and return JSON string."""
     target_index = index or DEFAULT_INDEX
-    _log.info("get_error_patterns: index=%s range=%dm service=%s", target_index, time_range_minutes, service)
 
     must_clauses: list[dict] = [
         {"range": {"@timestamp": {"gte": f"now-{time_range_minutes}m", "lte": "now"}}},
@@ -202,6 +199,28 @@ def _summarize_patterns(patterns: list[dict], total: int) -> str:
         f"Found {len(patterns)} unique error patterns from {total} total errors. "
         f"The dominant pattern ({top['percentage']}% of errors) is: \"{top['template'][:100]}...\""
     )
+
+
+@mcp.tool()
+def get_error_patterns(
+    index: str = "",
+    time_range_minutes: int = 60,
+    service: str = "",
+    top_n: int = 10,
+) -> str:
+    """Extract and group error log patterns by frequency.
+
+    Args:
+        index: Elasticsearch index pattern (default: configured default)
+        time_range_minutes: How far back to search in minutes (default: 60)
+        service: Filter by service name
+        top_n: Number of top patterns to return (default: 10)
+
+    Returns:
+        JSON with error patterns sorted by frequency, including sample messages.
+    """
+    _log.info("get_error_patterns: index=%s range=%dm service=%s", index or DEFAULT_INDEX, time_range_minutes, service)
+    return _do_error_patterns(index, time_range_minutes, service, top_n)
 
 
 @mcp.tool()
@@ -393,14 +412,14 @@ def batch_search(queries: str) -> str:
         qtype = q.get("type", "search")
 
         if qtype == "error_patterns":
-            result = json.loads(get_error_patterns(
+            result = json.loads(_do_error_patterns(
                 index=q.get("index", ""),
                 time_range_minutes=q.get("time_range_minutes", 60),
                 service=q.get("service", ""),
                 top_n=q.get("top_n", 10),
             ))
         else:
-            result = json.loads(search_logs(
+            result = json.loads(_do_search_logs(
                 query=q.get("query", "*"),
                 index=q.get("index", ""),
                 time_range_minutes=q.get("time_range_minutes", 60),
