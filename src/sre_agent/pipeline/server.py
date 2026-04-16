@@ -87,7 +87,8 @@ def create_pipeline_app(settings: Settings):
     _teams_url = settings.delivery.teams_webhook_url
     _public_base_url = settings.delivery.public_base_url
 
-    def _run_analysis(incident_request) -> None:
+    def _run_phase_a(incident_request) -> None:
+        """Phase A: automatic data collection + runbook matching."""
         from sre_agent.pipeline.intake import IncidentRequest
 
         req: IncidentRequest = incident_request
@@ -98,23 +99,23 @@ def create_pipeline_app(settings: Settings):
         try:
             from sre_agent.pipeline.delivery import send_alert_received
             alert_summary = f"{req.primary_alertname} ({req.primary_severity})"
-            # send_alert_received logs to console when teams_webhook_url is "".
             send_alert_received(_teams_url, req.incident_id, alert_summary)
         except Exception:
             logger.exception("Failed to deliver start notification for %s", req.incident_id)
 
-        result: AnalysisResult = analyzer.analyze(req)
+        result: AnalysisResult = analyzer.analyze_phase_a(req)
 
-        has_action = "MATCH_FOUND" in result.report
+        has_runbook = "MATCH_FOUND" in result.report
         report_sent_at = time.time()
 
         with _lock:
             _incidents[req.incident_id].update({
-                "status": result.status,
+                "status": result.status if result.status != "completed" else "phase_a_complete",
                 "report": result.report,
+                "collected_data": result.collected_data,
                 "elapsed_seconds": result.elapsed_seconds,
                 "analysis_level": result.analysis_level.value,
-                "has_action": has_action,
+                "has_action": has_runbook,
                 "error": result.error,
                 "report_sent_at": report_sent_at,
             })
@@ -127,11 +128,46 @@ def create_pipeline_app(settings: Settings):
                     incident_id=req.incident_id,
                     report=result.report,
                     elapsed=result.elapsed_seconds,
-                    has_action=has_action,
+                    has_action=has_runbook,
                     server_base_url=_public_base_url,
                 )
             except Exception:
                 logger.exception("Failed to deliver report for %s", req.incident_id)
+
+    def _run_phase_b(incident_id: str) -> None:
+        """Phase B: on-demand RCA + solution. Triggered by user action."""
+        with _lock:
+            collected_data = _incidents.get(incident_id, {}).get("collected_data", "")
+
+        if not collected_data:
+            logger.error("Phase B: no collected data for %s", incident_id)
+            with _lock:
+                _incidents[incident_id]["status"] = "rca_failed"
+                _incidents[incident_id]["rca_error"] = "No collected data from Phase A"
+            return
+
+        result: AnalysisResult = analyzer.analyze_phase_b(incident_id, collected_data)
+
+        with _lock:
+            _incidents[incident_id].update({
+                "status": "rca_completed" if result.status == "completed" else "rca_failed",
+                "rca_report": result.report,
+                "rca_elapsed_seconds": result.elapsed_seconds,
+                "rca_error": result.error,
+            })
+
+        if result.status == "completed":
+            try:
+                from sre_agent.pipeline.delivery import send_rca_complete
+                send_rca_complete(
+                    webhook_url=_teams_url,
+                    incident_id=incident_id,
+                    rca_report=result.report,
+                    elapsed=result.elapsed_seconds,
+                    server_base_url=_public_base_url,
+                )
+            except Exception:
+                logger.exception("Failed to deliver RCA report for %s", incident_id)
 
     # -- Endpoints ------------------------------------------------------------
 
@@ -159,7 +195,7 @@ def create_pipeline_app(settings: Settings):
                     "analysis_level": req.analysis_level.value,
                     "received_at": req.received_at,
                 }
-            background_tasks.add_task(_run_analysis, req)
+            background_tasks.add_task(_run_phase_a, req)
 
         return {
             "status": "accepted",
@@ -190,7 +226,7 @@ def create_pipeline_app(settings: Settings):
                     "analysis_level": req.analysis_level.value,
                     "received_at": req.received_at,
                 }
-            background_tasks.add_task(_run_analysis, req)
+            background_tasks.add_task(_run_phase_a, req)
 
         return {
             "status": "accepted",
@@ -222,6 +258,6 @@ def create_pipeline_app(settings: Settings):
             return _incidents[incident_id]
 
     from sre_agent.pipeline.approval import register_approval_routes
-    register_approval_routes(app, _incidents, settings, _lock)
+    register_approval_routes(app, _incidents, settings, _lock, rca_callback=_run_phase_b)
 
     return app

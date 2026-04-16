@@ -316,6 +316,13 @@
         </div>
         {% endif %}
 
+        {% if metrics_json %}
+        <div class="section">
+            <h2>메트릭 시각화</h2>
+            <div id="chartsContainer"></div>
+        </div>
+        {% endif %}
+
         <div class="section">
             <h2>분석 리포트</h2>
             {% if report_html %}
@@ -325,7 +332,41 @@
             {% endif %}
         </div>
 
-        {% if not expired and status != 'approved' and status != 'rejected' and runbook.status == 'match' and runbook.script_exists %}
+        {% if phase == 'rca_running' %}
+        <div class="section" style="border-color: #3b82f6;">
+            <h2 style="color: #60a5fa;">🔍 RCA 분석 진행 중...</h2>
+            <p style="color: #a1a1aa;">근본 원인 분석이 진행되고 있습니다. 페이지를 새로고침하면 결과를 확인할 수 있습니다.</p>
+            <button class="btn" style="background: #3b82f6; color: #fff; margin-top: 1rem;" onclick="location.reload()">🔄 새로고침</button>
+        </div>
+        {% elif phase == 'rca_completed' and rca_report_html %}
+        <div class="section" style="border-color: #3b82f6;">
+            <h2 style="color: #60a5fa;">🔍 RCA 분석 결과</h2>
+            <div class="report-content">{{ rca_report_html|safe }}</div>
+        </div>
+        {% endif %}
+
+        {% if not expired and phase == 'phase_a_complete' and runbook.status == 'match' and runbook.script_exists %}
+        <div class="actions">
+            <button class="btn btn-approve" id="approveBtn" onclick="submitApproval('approve')">
+                ✅ 조치 승인 및 실행
+            </button>
+            <button class="btn" id="rcaBtn" onclick="submitApproval('rca')" style="background: #3b82f6; color: #fff;">
+                🔍 RCA 진행
+            </button>
+            <button class="btn btn-reject" id="rejectBtn" onclick="submitApproval('reject')">
+                ❌ 거부
+            </button>
+        </div>
+        {% elif not expired and phase == 'phase_a_complete' %}
+        <div class="actions">
+            <button class="btn" id="rcaBtn" onclick="submitApproval('rca')" style="background: #3b82f6; color: #fff;">
+                🔍 RCA 진행
+            </button>
+            <button class="btn btn-reject" id="rejectBtn" onclick="submitApproval('reject')">
+                확인 (수동 조치 필요)
+            </button>
+        </div>
+        {% elif not expired and status != 'approved' and status != 'rejected' and status != 'rca_running' and status != 'rca_completed' and runbook.status == 'match' and runbook.script_exists %}
         <div class="actions">
             <button class="btn btn-approve" id="approveBtn" onclick="submitApproval('approve')">
                 ✅ 조치 승인 및 실행
@@ -334,25 +375,115 @@
                 ❌ 거부
             </button>
         </div>
-        {% elif not expired and status != 'approved' and status != 'rejected' %}
-        <div class="actions">
-            <button class="btn btn-reject" id="rejectBtn" onclick="submitApproval('reject')">
-                확인 (수동 조치 필요)
-            </button>
-        </div>
         {% endif %}
 
         <div class="status-msg" id="statusMsg"></div>
     </div>
 
+    {% if metrics_json %}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script>
+        (function() {
+            try {
+                const metricsData = {{ metrics_json|safe }};
+                const container = document.getElementById('chartsContainer');
+                if (!metricsData || !metricsData.length) return;
+
+                const colors = ['#3b82f6', '#22c55e', '#f59e0b'];
+
+                metricsData.forEach(function(metric, idx) {
+                    if (!metric.data || !metric.data.length) return;
+
+                    const wrapper = document.createElement('div');
+                    wrapper.style.marginBottom = '1.5rem';
+
+                    const label = document.createElement('div');
+                    label.style.cssText = 'color: #a1a1aa; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.5rem;';
+                    label.textContent = metric.label;
+                    wrapper.appendChild(label);
+
+                    const canvasWrapper = document.createElement('div');
+                    canvasWrapper.style.cssText = 'background: #09090b; border: 1px solid #27272a; border-radius: 6px; padding: 1rem;';
+                    const canvas = document.createElement('canvas');
+                    canvas.height = 200;
+                    canvasWrapper.appendChild(canvas);
+                    wrapper.appendChild(canvasWrapper);
+
+                    // Stats row
+                    const values = metric.data.map(d => d.v);
+                    const min = Math.min(...values);
+                    const max = Math.max(...values);
+                    const avg = values.reduce((a, b) => a + b, 0) / values.length;
+                    const latest = values[values.length - 1];
+
+                    const stats = document.createElement('div');
+                    stats.style.cssText = 'display: flex; gap: 1.5rem; margin-top: 0.5rem; font-size: 0.8rem; color: #a1a1aa;';
+                    stats.innerHTML =
+                        '<span>현재: <strong style="color:#fafafa">' + latest.toFixed(1) + '</strong></span>' +
+                        '<span>평균: <strong style="color:#fafafa">' + avg.toFixed(1) + '</strong></span>' +
+                        '<span>최소: <strong style="color:#22c55e">' + min.toFixed(1) + '</strong></span>' +
+                        '<span>최대: <strong style="color:#ef4444">' + max.toFixed(1) + '</strong></span>';
+                    wrapper.appendChild(stats);
+
+                    container.appendChild(wrapper);
+
+                    const color = colors[idx % colors.length];
+                    new Chart(canvas, {
+                        type: 'line',
+                        data: {
+                            datasets: [{
+                                label: metric.label,
+                                data: metric.data.map(d => ({ x: new Date(d.t), y: d.v })),
+                                borderColor: color,
+                                backgroundColor: color + '20',
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 0,
+                                borderWidth: 2,
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: {
+                                    backgroundColor: '#18181b',
+                                    titleColor: '#fafafa',
+                                    bodyColor: '#d4d4d8',
+                                    borderColor: '#27272a',
+                                    borderWidth: 1,
+                                }
+                            },
+                            scales: {
+                                x: {
+                                    type: 'time',
+                                    time: { tooltipFormat: 'HH:mm:ss' },
+                                    grid: { color: '#27272a' },
+                                    ticks: { color: '#71717a', maxTicksLimit: 8 },
+                                },
+                                y: {
+                                    grid: { color: '#27272a' },
+                                    ticks: { color: '#71717a' },
+                                }
+                            }
+                        }
+                    });
+                });
+            } catch(e) {
+                console.error('Chart rendering error:', e);
+            }
+        })();
+    </script>
+    {% endif %}
+
     <script>
         async function submitApproval(action) {
-            const approveBtn = document.getElementById('approveBtn');
-            const rejectBtn = document.getElementById('rejectBtn');
+            const btns = document.querySelectorAll('.actions .btn');
             const statusMsg = document.getElementById('statusMsg');
 
-            approveBtn.disabled = true;
-            rejectBtn.disabled = true;
+            btns.forEach(b => b.disabled = true);
 
             try {
                 const resp = await fetch(window.location.pathname, {
@@ -369,6 +500,13 @@
                 } else if (data.status === 'rejected') {
                     statusMsg.classList.add('status-rejected');
                     statusMsg.textContent = '❌ 거부됨 — 수동 조치가 필요합니다.';
+                } else if (data.status === 'rca_started') {
+                    statusMsg.classList.add('status-success');
+                    statusMsg.style.background = '#172554';
+                    statusMsg.style.borderColor = '#3b82f6';
+                    statusMsg.style.color = '#60a5fa';
+                    statusMsg.textContent = '🔍 RCA 분석이 시작되었습니다. 잠시 후 페이지를 새로고침하세요.';
+                    setTimeout(() => location.reload(), 5000);
                 } else {
                     statusMsg.classList.add('status-error');
                     statusMsg.textContent = '⚠️ ' + (data.error || '처리 중 오류가 발생했습니다.');
@@ -376,8 +514,7 @@
             } catch (err) {
                 statusMsg.className = 'status-msg status-error';
                 statusMsg.textContent = '⚠️ 네트워크 오류: ' + err.message;
-                approveBtn.disabled = false;
-                rejectBtn.disabled = false;
+                btns.forEach(b => b.disabled = false);
             }
         }
     </script>

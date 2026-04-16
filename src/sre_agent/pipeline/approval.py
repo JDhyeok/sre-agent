@@ -27,7 +27,28 @@ _RUNBOOK_DIR = Path(__file__).resolve().parent.parent / "runbooks"
 _APPROVAL_TIMEOUT_MINUTES = 10
 
 
-def register_approval_routes(app, incidents: dict, settings: Settings, lock) -> None:
+def _extract_metrics_json(report: str) -> str:
+    """Extract metrics_json code block from the report for chart rendering.
+
+    Returns the raw JSON string, or empty string if not found.
+    """
+    match = re.search(r"```metrics_json\s*\n(.*?)```", report, re.DOTALL)
+    if not match:
+        return ""
+    raw = match.group(1).strip()
+    # Validate it's parseable JSON
+    try:
+        import json
+        json.loads(raw)
+        return raw
+    except (json.JSONDecodeError, ValueError):
+        return ""
+
+
+def register_approval_routes(
+    app, incidents: dict, settings: Settings, lock,
+    rca_callback=None,
+) -> None:
     """Register approval-related routes onto the FastAPI app.
 
     Args:
@@ -35,6 +56,8 @@ def register_approval_routes(app, incidents: dict, settings: Settings, lock) -> 
         incidents: Shared incidents dict from the pipeline server
         settings: Application settings
         lock: Threading lock for incidents dict
+        rca_callback: Optional callback for Phase B RCA execution.
+                      Signature: rca_callback(incident_id: str) -> None
     """
     try:
         from fastapi import Request
@@ -98,16 +121,34 @@ def register_approval_routes(app, incidents: dict, settings: Settings, lock) -> 
         # Build the "what will run" panel from the runbook matcher's verdict.
         runbook_view = _build_runbook_view(report_md)
 
+        # Phase B (RCA) results
+        phase = incident.get("status", "unknown")
+        rca_report_md = incident.get("rca_report", "")
+        rca_report_html = ""
+        if rca_report_md:
+            try:
+                rca_report_html = _md.convert(rca_report_md)
+                _md.reset()
+            except Exception:
+                rca_report_html = _strip_markdown_markers(rca_report_md)
+
+        # Extract chart data from report
+        metrics_json = _extract_metrics_json(report_md)
+
         template = _jinja_env.get_template("approval.html")
         html = template.render(
             incident_id=incident_id,
-            status=incident.get("status", "unknown"),
+            status=phase,
             analysis_level=incident.get("analysis_level", ""),
             elapsed_seconds=incident.get("elapsed_seconds", 0),
             report_html=report_html,
             report_plain=report_plain,
             expired=expired,
             runbook=runbook_view,
+            phase=phase,
+            rca_report_html=rca_report_html,
+            rca_callback_available=(rca_callback is not None),
+            metrics_json=metrics_json,
         )
         return HTMLResponse(html)
 
@@ -130,6 +171,26 @@ def register_approval_routes(app, incidents: dict, settings: Settings, lock) -> 
         current_status = incident.get("status", "")
         if current_status in ("approved", "rejected"):
             return JSONResponse({"status": current_status, "error": "Already processed"})
+
+        if action == "rca":
+            if current_status == "rca_running":
+                return JSONResponse({"status": "rca_running", "error": "RCA already in progress"})
+            if current_status == "rca_completed":
+                return JSONResponse({"status": "rca_completed", "error": "RCA already completed"})
+            if rca_callback is None:
+                return JSONResponse({"status": "error", "error": "RCA not available"}, status_code=500)
+
+            with lock:
+                incidents[incident_id]["status"] = "rca_running"
+
+            import threading
+            threading.Thread(
+                target=rca_callback,
+                args=(incident_id,),
+                daemon=True,
+            ).start()
+
+            return JSONResponse({"status": "rca_started"})
 
         if action == "reject":
             with lock:

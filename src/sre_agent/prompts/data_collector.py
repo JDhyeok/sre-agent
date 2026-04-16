@@ -193,10 +193,26 @@ _SSH_DIAGNOSTIC_SECTION = """
       호스트 이름만 지정하면 됩니다. **읽기 전용 진단만 가능합니다.**"""
 
 
-def build_system_prompt(max_tool_calls: int = 6, *, ssh_enabled: bool = False) -> str:
+_APM_SECTION = """
+### HMG-APM (애플리케이션 성능 모니터링)
+도구: get_apm_objects, get_active_services, get_xlog_data, get_thread_dump,
+      batch_apm_query
+용도: JVM 인스턴스 상태(alive/dead), 활성 서비스 요청, 트랜잭션 트레이스(XLog),
+      응답 시간 분석, 에러율, SQL/API 호출 통계, 스레드 덤프(교착 상태 분석).
+주의: APM 데이터는 애플리케이션 레벨 성능 분석에 활용하세요.
+      인프라 메트릭(CPU/메모리/디스크)은 Prometheus나 SSH 진단을 사용하세요."""
+
+
+def build_system_prompt(
+    max_tool_calls: int = 6,
+    *,
+    ssh_enabled: bool = False,
+    apm_enabled: bool = False,
+) -> str:
     """Build the data collector system prompt with the tool call budget injected."""
     ssh_section = _SSH_DIAGNOSTIC_SECTION if ssh_enabled else ""
+    apm_section = _APM_SECTION if apm_enabled else ""
     return SYSTEM_PROMPT_TEMPLATE.format(
         max_tool_calls=max_tool_calls,
-        ssh_diagnostic_section=ssh_section,
+        ssh_diagnostic_section=ssh_section + apm_section,
     )
