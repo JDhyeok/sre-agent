@@ -221,5 +221,63 @@ def get_targets_health() -> str:
         return json.dumps({"status": "error", "error": str(e)})
 
 
+@mcp.tool()
+def batch_query(queries: str) -> str:
+    """Execute multiple PromQL queries in a single call.
+
+    Far more efficient than calling query_instant or query_range multiple times.
+    Use this tool when you need to check 2 or more metrics at once — it saves
+    one LLM round-trip per additional query.
+
+    Args:
+        queries: A JSON array of query objects. Each object accepts:
+            - query (str, required): PromQL expression
+            - type (str): "instant" (default) or "range"
+            - duration_minutes (int): For range queries only (default: 60)
+            - step (str): For range queries only (default: "60s")
+
+        Example:
+            [
+              {"query": "up", "type": "instant"},
+              {"query": "rate(http_requests_total[5m])", "type": "instant"},
+              {"query": "node_memory_MemAvailable_bytes", "type": "range", "duration_minutes": 30}
+            ]
+
+    Returns:
+        JSON with an array of results, one per input query, in the same order.
+    """
+    try:
+        query_list = json.loads(queries)
+    except (json.JSONDecodeError, TypeError) as e:
+        return json.dumps({"status": "error", "error": f"Invalid JSON input: {e}"})
+
+    if not isinstance(query_list, list):
+        return json.dumps({"status": "error", "error": "Input must be a JSON array of query objects."})
+
+    results = []
+    for idx, q in enumerate(query_list):
+        expr = q.get("query", "")
+        if not expr:
+            results.append({"status": "error", "error": f"Query at index {idx} is missing 'query' field."})
+            continue
+
+        qtype = q.get("type", "instant")
+        if qtype == "range":
+            result = json.loads(query_range(
+                expr,
+                q.get("duration_minutes", 60),
+                q.get("step", "60s"),
+            ))
+        else:
+            result = json.loads(query_instant(expr))
+        results.append(result)
+
+    return json.dumps({
+        "status": "success",
+        "query_count": len(results),
+        "results": results,
+    })
+
+
 if __name__ == "__main__":
     mcp.run()

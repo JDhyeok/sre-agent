@@ -343,5 +343,70 @@ def get_field_aggregation(
         return json.dumps({"status": "error", "error": str(e)})
 
 
+@mcp.tool()
+def batch_search(queries: str) -> str:
+    """Execute multiple log searches in a single call.
+
+    Far more efficient than calling search_logs or get_error_patterns multiple
+    times. Use this tool when you need to query 2 or more log searches at once.
+
+    Args:
+        queries: A JSON array of search objects. Each object accepts:
+            - type (str): "search" (default) or "error_patterns"
+            - query (str): Lucene query string (for type "search")
+            - index (str): Index pattern (default: configured default)
+            - time_range_minutes (int): default 60
+            - log_level (str): Filter by level
+            - service (str): Filter by service
+            - max_results (int): For "search" type (default: 50, max: 500)
+            - top_n (int): For "error_patterns" type (default: 10)
+
+        Example:
+            [
+              {"type": "search", "query": "error", "service": "payment-api", "max_results": 20},
+              {"type": "error_patterns", "service": "payment-api", "time_range_minutes": 30},
+              {"type": "search", "query": "timeout", "log_level": "error"}
+            ]
+
+    Returns:
+        JSON with an array of results, one per input query, in the same order.
+    """
+    try:
+        query_list = json.loads(queries)
+    except (json.JSONDecodeError, TypeError) as e:
+        return json.dumps({"status": "error", "error": f"Invalid JSON input: {e}"})
+
+    if not isinstance(query_list, list):
+        return json.dumps({"status": "error", "error": "Input must be a JSON array of search objects."})
+
+    results = []
+    for q in query_list:
+        qtype = q.get("type", "search")
+
+        if qtype == "error_patterns":
+            result = json.loads(get_error_patterns(
+                index=q.get("index", ""),
+                time_range_minutes=q.get("time_range_minutes", 60),
+                service=q.get("service", ""),
+                top_n=q.get("top_n", 10),
+            ))
+        else:
+            result = json.loads(search_logs(
+                query=q.get("query", "*"),
+                index=q.get("index", ""),
+                time_range_minutes=q.get("time_range_minutes", 60),
+                log_level=q.get("log_level", ""),
+                service=q.get("service", ""),
+                max_results=q.get("max_results", 50),
+            ))
+        results.append(result)
+
+    return json.dumps({
+        "status": "success",
+        "query_count": len(results),
+        "results": results,
+    })
+
+
 if __name__ == "__main__":
     mcp.run()

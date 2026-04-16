@@ -18,7 +18,7 @@ from strands.tools.mcp import MCPClient
 
 from sre_agent.config import Settings
 from sre_agent.model import create_model
-from sre_agent.prompts.data_collector import SYSTEM_PROMPT
+from sre_agent.prompts.data_collector import build_system_prompt
 
 _MCP_DIR = Path(__file__).resolve().parent.parent / "mcp_servers"
 _PROMETHEUS_SCRIPT = str(_MCP_DIR / "prometheus_server.py")
@@ -38,6 +38,8 @@ def create_data_collector_agent(
 ) -> Agent:
     """Create a Data Collector agent backed by Prometheus, ES, and CMDB MCP servers."""
     model = create_model(settings.anthropic, max_tokens=settings.agent_tokens.data_collector)
+    max_tool_calls = settings.agent_tokens.data_collector_max_tool_calls
+    system_prompt = build_system_prompt(max_tool_calls=max_tool_calls)
 
     prometheus_mcp = MCPClient(lambda: stdio_client(
         StdioServerParameters(
@@ -79,7 +81,7 @@ def create_data_collector_agent(
 
     return Agent(
         model=model,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         tools=[prometheus_mcp, elasticsearch_mcp, cmdb_mcp],
         callback_handler=callback_handler,
     )
