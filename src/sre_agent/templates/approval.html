@@ -325,19 +325,47 @@
             {% endif %}
         </div>
 
-        {% if not expired and status != 'approved' and status != 'rejected' and runbook.status == 'match' and runbook.script_exists %}
+        {% if phase == 'rca_running' %}
+        <div class="section" style="border-color: #3b82f6;">
+            <h2 style="color: #60a5fa;">🔍 RCA 분석 진행 중...</h2>
+            <p style="color: #a1a1aa;">근본 원인 분석이 진행되고 있습니다. 페이지를 새로고침하면 결과를 확인할 수 있습니다.</p>
+            <button class="btn" style="background: #3b82f6; color: #fff; margin-top: 1rem;" onclick="location.reload()">🔄 새로고침</button>
+        </div>
+        {% elif phase == 'rca_completed' and rca_report_html %}
+        <div class="section" style="border-color: #3b82f6;">
+            <h2 style="color: #60a5fa;">🔍 RCA 분석 결과</h2>
+            <div class="report-content">{{ rca_report_html|safe }}</div>
+        </div>
+        {% endif %}
+
+        {% if not expired and phase == 'phase_a_complete' and runbook.status == 'match' and runbook.script_exists %}
+        <div class="actions">
+            <button class="btn btn-approve" id="approveBtn" onclick="submitApproval('approve')">
+                ✅ 조치 승인 및 실행
+            </button>
+            <button class="btn" id="rcaBtn" onclick="submitApproval('rca')" style="background: #3b82f6; color: #fff;">
+                🔍 RCA 진행
+            </button>
+            <button class="btn btn-reject" id="rejectBtn" onclick="submitApproval('reject')">
+                ❌ 거부
+            </button>
+        </div>
+        {% elif not expired and phase == 'phase_a_complete' %}
+        <div class="actions">
+            <button class="btn" id="rcaBtn" onclick="submitApproval('rca')" style="background: #3b82f6; color: #fff;">
+                🔍 RCA 진행
+            </button>
+            <button class="btn btn-reject" id="rejectBtn" onclick="submitApproval('reject')">
+                확인 (수동 조치 필요)
+            </button>
+        </div>
+        {% elif not expired and status != 'approved' and status != 'rejected' and status != 'rca_running' and status != 'rca_completed' and runbook.status == 'match' and runbook.script_exists %}
         <div class="actions">
             <button class="btn btn-approve" id="approveBtn" onclick="submitApproval('approve')">
                 ✅ 조치 승인 및 실행
             </button>
             <button class="btn btn-reject" id="rejectBtn" onclick="submitApproval('reject')">
                 ❌ 거부
-            </button>
-        </div>
-        {% elif not expired and status != 'approved' and status != 'rejected' %}
-        <div class="actions">
-            <button class="btn btn-reject" id="rejectBtn" onclick="submitApproval('reject')">
-                확인 (수동 조치 필요)
             </button>
         </div>
         {% endif %}
@@ -347,12 +375,10 @@
 
     <script>
         async function submitApproval(action) {
-            const approveBtn = document.getElementById('approveBtn');
-            const rejectBtn = document.getElementById('rejectBtn');
+            const btns = document.querySelectorAll('.actions .btn');
             const statusMsg = document.getElementById('statusMsg');
 
-            approveBtn.disabled = true;
-            rejectBtn.disabled = true;
+            btns.forEach(b => b.disabled = true);
 
             try {
                 const resp = await fetch(window.location.pathname, {
@@ -369,6 +395,13 @@
                 } else if (data.status === 'rejected') {
                     statusMsg.classList.add('status-rejected');
                     statusMsg.textContent = '❌ 거부됨 — 수동 조치가 필요합니다.';
+                } else if (data.status === 'rca_started') {
+                    statusMsg.classList.add('status-success');
+                    statusMsg.style.background = '#172554';
+                    statusMsg.style.borderColor = '#3b82f6';
+                    statusMsg.style.color = '#60a5fa';
+                    statusMsg.textContent = '🔍 RCA 분석이 시작되었습니다. 잠시 후 페이지를 새로고침하세요.';
+                    setTimeout(() => location.reload(), 5000);
                 } else {
                     statusMsg.classList.add('status-error');
                     statusMsg.textContent = '⚠️ ' + (data.error || '처리 중 오류가 발생했습니다.');
@@ -376,8 +409,7 @@
             } catch (err) {
                 statusMsg.className = 'status-msg status-error';
                 statusMsg.textContent = '⚠️ 네트워크 오류: ' + err.message;
-                approveBtn.disabled = false;
-                rejectBtn.disabled = false;
+                btns.forEach(b => b.disabled = false);
             }
         }
     </script>

@@ -197,3 +197,42 @@ def send_action_result(
         ],
     }
     return _post_card(webhook_url, card)
+
+
+def send_rca_complete(
+    webhook_url: str,
+    incident_id: str,
+    rca_report: str,
+    elapsed: float = 0.0,
+    server_base_url: str = "",
+) -> bool:
+    """Send a notification that RCA analysis has completed."""
+    text = rca_report[:4800]
+    if len(rca_report) > 4800:
+        text += "\n\n> 리포트가 잘림. 전체 내용은 웹 UI에서 확인하세요."
+
+    card = {
+        "@type": "MessageCard",
+        "@context": "http://schema.org/extensions",
+        "themeColor": "0078D7",
+        "summary": f"SRE Agent RCA 완료 — {incident_id}",
+        "sections": [
+            {
+                "activityTitle": f"🔍 RCA 분석 완료 — {incident_id}",
+                "activitySubtitle": f"소요 시간: {elapsed:.1f}s",
+                "text": text,
+                "markdown": True,
+            }
+        ],
+    }
+
+    if server_base_url:
+        card["potentialAction"] = [
+            {
+                "@type": "OpenUri",
+                "name": "📄 상세 보기",
+                "targets": [{"os": "default", "uri": f"{server_base_url}/approve/{incident_id}"}],
+            },
+        ]
+
+    return _post_card(webhook_url, card)
