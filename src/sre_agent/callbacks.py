@@ -8,6 +8,56 @@ from typing import Any, Callable
 
 from rich.console import Console
 
+def _format_tool_detail(tool_name: str, tool_input: dict) -> str:
+    """Format a compact summary of tool arguments for logging."""
+    if not tool_input:
+        return ""
+
+    # Prometheus tools
+    if tool_name in ("query_instant", "query_range"):
+        q = tool_input.get("query", "")
+        return f"  query={q}" if q else ""
+    if tool_name == "batch_query":
+        q = tool_input.get("queries", "")
+        return f"  queries={q[:200]}" if q else ""
+
+    # Elasticsearch tools
+    if tool_name == "search_logs":
+        parts = []
+        if tool_input.get("query"):
+            parts.append(f"query={tool_input['query']}")
+        if tool_input.get("service"):
+            parts.append(f"service={tool_input['service']}")
+        if tool_input.get("log_level"):
+            parts.append(f"level={tool_input['log_level']}")
+        return f"  {' '.join(parts)}" if parts else ""
+    if tool_name == "get_error_patterns":
+        svc = tool_input.get("service", "")
+        return f"  service={svc}" if svc else ""
+    if tool_name == "batch_search":
+        q = tool_input.get("queries", "")
+        return f"  queries={q[:200]}" if q else ""
+
+    # SSH diagnostic tools
+    if tool_name in ("get_processes", "get_top_cpu_processes", "get_top_memory_processes",
+                      "get_network_connections", "get_listening_ports", "get_memory_info",
+                      "get_disk_usage", "get_system_load", "get_vmstat", "get_dmesg"):
+        h = tool_input.get("hostname", "")
+        return f"  host={h}" if h else ""
+    if tool_name in ("get_service_status", "get_service_logs"):
+        h = tool_input.get("hostname", "")
+        s = tool_input.get("service", "")
+        return f"  host={h} service={s}"
+
+    # SSH exec (ssh_agent)
+    if tool_name == "exec_command":
+        h = tool_input.get("hostname", "")
+        c = tool_input.get("command", "")
+        return f"  host={h} cmd={c}"
+
+    return ""
+
+
 _AGENT_LABELS: dict[str, str] = {
     "data_collector_agent": "Data Collector",
     "ssh_agent": "SSH Diagnostics",
@@ -86,7 +136,8 @@ class AgentProgressTracker:
         tid = tool.get("toolUseId", "")
         if name and tid and tid not in self._seen:
             self._seen.add(tid)
-            self.console.print(f"    [dim]↳ {name}[/dim]")
+            detail = _format_tool_detail(name, tool.get("input", {}))
+            self.console.print(f"    [dim]↳ {name}[/dim]{detail}")
 
     # -- convenience: get callbacks for agent creation -------------------------
 
@@ -137,7 +188,8 @@ class LoggingProgressTracker:
         tid = tool.get("toolUseId", "")
         if name and tid and tid not in self._seen:
             self._seen.add(tid)
-            self._logger.info("%s    ↳ %s", self._prefix, name)
+            detail = _format_tool_detail(name, tool.get("input", {}))
+            self._logger.info("%s    ↳ %s%s", self._prefix, name, detail)
 
     def get_orchestrator_handler(self) -> Callable[..., None]:
         return self._orchestrator_callback
