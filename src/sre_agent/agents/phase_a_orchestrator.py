@@ -21,8 +21,15 @@ def create_phase_a_orchestrator(
     *,
     callback_handler: Callable[..., Any] | None = None,
     tool_callback_handler: Callable[..., Any] | None = None,
-) -> Agent:
-    """Create the Phase A orchestrator with data collector + runbook matcher."""
+) -> tuple[Agent, dict[str, Any]]:
+    """Create the Phase A orchestrator with data collector + runbook matcher.
+
+    Returns:
+        (agent, match_result) — *match_result* is a mutable dict that the
+        ``report_match`` tool inside runbook_matcher_agent writes to.
+        Read it after the orchestrator finishes to get structured runbook
+        match data (no regex parsing needed).
+    """
     model = create_model(settings.anthropic, max_tokens=settings.agent_tokens.orchestrator)
 
     system_prompt = build_system_prompt(
@@ -37,7 +44,7 @@ def create_phase_a_orchestrator(
     data_collector_agent = create_data_collector_agent(
         settings, callback_handler=tool_callback_handler,
     )
-    runbook_matcher_agent = create_runbook_matcher_agent(
+    runbook_matcher_agent, match_result = create_runbook_matcher_agent(
         settings, callback_handler=tool_callback_handler,
     )
 
@@ -65,9 +72,10 @@ def create_phase_a_orchestrator(
         ),
     ]
 
-    return Agent(
+    orchestrator = Agent(
         model=model,
         system_prompt=system_prompt,
         tools=tools,
         callback_handler=callback_handler,
     )
+    return orchestrator, match_result

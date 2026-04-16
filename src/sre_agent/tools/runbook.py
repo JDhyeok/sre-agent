@@ -144,6 +144,57 @@ def list_runbooks() -> str:
     return "\n".join(entries).rstrip()
 
 
+def create_match_reporter() -> tuple[Any, dict[str, Any]]:
+    """Create a ``report_match`` tool and its shared result container.
+
+    The tool writes structured match data into the container dict.  After
+    the matcher agent finishes, the caller reads the container directly —
+    no text-parsing required.
+
+    Returns:
+        (report_match_tool, result_container)
+    """
+    container: dict[str, Any] = {
+        "matched": False,
+        "name": "",
+        "risk": "",
+        "script": "",
+        "target_host_label": "",
+    }
+
+    @tool
+    def report_match(
+        matched: bool,
+        name: str = "",
+        risk: str = "",
+        script: str = "",
+        target_host_label: str = "",
+    ) -> str:
+        """Register the final runbook matching decision.
+
+        You MUST call this tool exactly once as your last action to record
+        whether a runbook was matched.
+
+        Args:
+            matched: True if a runbook matches the incident, False otherwise.
+            name: The runbook name (from frontmatter). Required when matched=True.
+            risk: Risk level (low/medium/high/critical). Required when matched=True.
+            script: Script path from the runbook frontmatter. Required when matched=True.
+            target_host_label: Target host label from frontmatter. Optional.
+
+        Returns:
+            Confirmation message.
+        """
+        container["matched"] = matched
+        container["name"] = name
+        container["risk"] = risk
+        container["script"] = script
+        container["target_host_label"] = target_host_label
+        return f"Match result recorded: matched={matched}" + (f", runbook={name}" if matched else "")
+
+    return report_match, container
+
+
 @tool
 def get_runbook(name: str) -> str:
     """Fetch the full content of a single runbook by name.

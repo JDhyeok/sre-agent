@@ -146,8 +146,9 @@ def register_approval_routes(
         # at least drop the marker characters so the page is readable).
         report_plain = _strip_markdown_markers(report_display)
 
-        # Build the "what will run" panel from the runbook matcher's verdict.
-        runbook_view = _build_runbook_view(report_md)
+        # Build the "what will run" panel from structured match data.
+        runbook_match = incident.get("runbook_match", {})
+        runbook_view = _build_runbook_view(report_md, runbook_match)
 
         # Phase B (RCA) results
         phase = incident.get("status", "unknown")
@@ -197,7 +198,7 @@ def register_approval_routes(
             return JSONResponse({"status": "expired", "error": "Approval timeout exceeded"})
 
         current_status = incident.get("status", "")
-        if current_status in ("approved", "rejected"):
+        if current_status in ("approved", "rejected", "manual_action"):
             return JSONResponse({"status": current_status, "error": "Already processed"})
 
         if action == "rca":
@@ -238,6 +239,24 @@ def register_approval_routes(
 
             return JSONResponse({"status": "rejected"})
 
+        if action == "manual_action":
+            with lock:
+                incidents[incident_id]["status"] = "manual_action"
+
+            if settings.delivery.teams_webhook_url:
+                try:
+                    from sre_agent.pipeline.delivery import send_action_result
+                    send_action_result(
+                        settings.delivery.teams_webhook_url,
+                        incident_id,
+                        success=True,
+                        message="수동조치예정으로 처리되었습니다. 담당자가 직접 조치합니다.",
+                    )
+                except Exception:
+                    logger.exception("Failed to send manual action notification")
+
+            return JSONResponse({"status": "manual_action"})
+
         if action == "approve":
             with lock:
                 incidents[incident_id]["status"] = "approved"
@@ -254,6 +273,12 @@ def register_approval_routes(
 
 def _execute_action(incident_id: str, incident: dict, settings: Settings) -> dict[str, Any]:
     """Execute the approved remediation via SSH-based runbook execution."""
+    # Primary: structured match data from report_match tool
+    match_data = incident.get("runbook_match", {})
+    if match_data.get("matched") and match_data.get("name"):
+        return _execute_runbook(incident_id, match_data["name"], settings)
+
+    # Fallback: text parsing for legacy incidents
     report = incident.get("report", "")
     if "MATCH_FOUND" not in report:
         return {"status": "skipped", "reason": "No remediation matched"}
@@ -288,36 +313,41 @@ def _strip_markdown_markers(text: str) -> str:
     return "\n".join(out)
 
 
-def _build_runbook_view(report: str) -> dict[str, Any]:
+def _build_runbook_view(report: str, match_data: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build the data the approval page shows about the matched runbook.
+
+    Uses **structured match data** from the ``report_match`` tool (the
+    ``match_data`` dict) as the primary source of truth.  This is
+    deterministic — no regex parsing of LLM text output.
+
+    Falls back to text parsing only for legacy incidents that don't have
+    structured data (e.g., created before this change).
 
     Returns a dict with one of three shapes (the template branches on
     ``status``):
 
-        {"status": "match", "name": ..., "risk": ..., "script_path": ...,
-         "script_body": ..., "script_exists": bool, "target_host_label": ...,
-         "trigger": ..., "why": ..., "what": ...}
+        {"status": "match", "name": ..., "risk": ..., ...}
         {"status": "no_match", "reason": ..., "alternatives": [...]}
-        {"status": "none"}   # report did not contain a runbook section yet
-
-    The matcher prompt mandates English field keys/headers, but LLMs
-    occasionally translate the entire block to the user's language anyway.
-    The parser tolerates Korean translations as a defensive fallback so
-    that one stray translation does not silently degrade the approval UI
-    to "manual action required".
+        {"status": "none"}
     """
-    if not report:
+    if not report and not match_data:
         return {"status": "none"}
 
-    # NO_MATCH detection: only treat the report as no_match if MATCH_FOUND
-    # is NOT also present. (LLMs sometimes mention "NO_MATCH" in narrative
-    # text inside a successful match, e.g. "...NO_MATCH 가능성도 있었으나".)
-    has_match = bool(re.search(r"\*\*(?:Status|상태)\*\*:\s*MATCH_FOUND", report))
-    has_no_match = bool(re.search(r"\*\*(?:Status|상태)\*\*:\s*NO_MATCH", report))
-    if has_no_match and not has_match:
+    # --- Primary path: structured data from report_match tool ---------------
+    if match_data and match_data.get("matched"):
+        return _build_match_from_structured(match_data, report)
+
+    if match_data and not match_data.get("matched") and match_data.get("name") == "":
+        # report_match was called with matched=False → explicit NO_MATCH
         return _parse_no_match(report)
 
-    name = _extract_runbook_name(report)
+    # --- Fallback: text parsing (legacy / report_match not called) ----------
+    return _build_match_from_text(report)
+
+
+def _build_match_from_structured(match_data: dict[str, Any], report: str) -> dict[str, Any]:
+    """Build runbook view from the structured ``report_match`` tool output."""
+    name = match_data.get("name", "")
     if not name:
         return {"status": "none"}
 
@@ -326,18 +356,17 @@ def _build_runbook_view(report: str) -> dict[str, Any]:
         return {
             "status": "match",
             "name": name,
-            "risk": "unknown",
-            "script_path": "",
+            "risk": match_data.get("risk", "unknown"),
+            "script_path": match_data.get("script", ""),
             "script_body": "",
             "script_exists": False,
             "script_missing_reason": (
-                f"Runbook '{name}' is referenced in the report but not present "
-                f"in {_RUNBOOK_DIR}."
+                f"Runbook '{name}' is referenced but not present in {_RUNBOOK_DIR}."
             ),
-            "target_host_label": "",
+            "target_host_label": match_data.get("target_host_label", ""),
             "trigger": "",
-            "why": _extract_section(report, "Why this matches"),
-            "what": _extract_section(report, "What it will do"),
+            "why": _extract_why(report),
+            "what": _extract_what(report),
         }
 
     meta, _body = loaded
@@ -371,6 +400,27 @@ def _build_runbook_view(report: str) -> dict[str, Any]:
         "why": _extract_why(report),
         "what": _extract_what(report),
     }
+
+
+def _build_match_from_text(report: str) -> dict[str, Any]:
+    """Legacy fallback: parse runbook match from LLM text output.
+
+    Used only for incidents that don't have structured match data
+    (e.g., created before the report_match tool was added).
+    """
+    if not report:
+        return {"status": "none"}
+
+    has_match = bool(re.search(r"MATCH_FOUND", report))
+    has_no_match = bool(re.search(r"NO_MATCH", report))
+    if has_no_match and not has_match:
+        return _parse_no_match(report)
+
+    name = _extract_runbook_name(report)
+    if not name:
+        return {"status": "none"}
+
+    return _build_match_from_structured({"matched": True, "name": name}, report)
 
 
 def _parse_no_match(report: str) -> dict[str, Any]:
@@ -449,8 +499,29 @@ def _extract_runbook_name(report: str) -> str | None:
     translate the field key when the rest of the report is in Korean. We
     accept either form so the approval UI does not silently degrade.
     """
-    match = re.search(r"\*\*(?:Runbook|런북|런 북)\*\*:\s*([A-Za-z0-9._-]+)", report)
-    return match.group(1) if match else None
+    # Strategy 1: Match any bold key containing "runbook" or "런북" followed by a name.
+    # This handles all observed LLM variants: **Runbook**, **런북**, **런북명**,
+    # **매칭된 런북**, **매칭된 Runbook**, etc.
+    match = re.search(
+        r"\*\*(?:[^*]*(?:Runbook|런\s*북)[^*]*)\*\*:\s*`?([A-Za-z0-9._-]+)`?",
+        report, re.IGNORECASE,
+    )
+    if match:
+        return match.group(1)
+
+    # Strategy 2: If MATCH_FOUND is present, look for a runbook-like name near it.
+    # Runbook names in this project follow the pattern: word-word(-word)*.
+    if re.search(r"MATCH_FOUND", report):
+        # Look for a name that looks like a runbook slug (e.g., "memory-leak-restart")
+        # near context clues like "런북", "runbook", "스크립트" etc.
+        name_match = re.search(
+            r"(?:런\s*북|runbook|스크립트|script)[^`\n]*`([A-Za-z0-9._-]+)`",
+            report, re.IGNORECASE,
+        )
+        if name_match:
+            return name_match.group(1)
+
+    return None
 
 
 def _resolve_script_path(script_field: str) -> Path | None:

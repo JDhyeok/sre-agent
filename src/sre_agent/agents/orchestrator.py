@@ -47,7 +47,7 @@ def create_orchestrator(
     ssh_agent = create_ssh_agent(settings, callback_handler=tool_callback_handler)
     rca_agent = create_rca_agent(settings, callback_handler=tool_callback_handler)
     solution_agent = create_solution_agent(settings, callback_handler=tool_callback_handler)
-    runbook_matcher_agent = create_runbook_matcher_agent(
+    runbook_matcher_agent, _match_result = create_runbook_matcher_agent(
         settings, callback_handler=tool_callback_handler,
     )
 

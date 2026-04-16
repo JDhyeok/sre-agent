@@ -83,6 +83,8 @@ services:
                   severity: critical
                   service: memory-leak-app
                   container: sre-memory-leak-app
+                  container_label_sre_test_role: memory-leak
+                  container_label_com_docker_compose_service: memory-leak-app
                 annotations:
                   summary: "memory-leak-app container memory > 80% of limit for 1m"
                   description: |

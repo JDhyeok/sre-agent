@@ -3,374 +3,444 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SRE Agent — 조치 승인</title>
+    <title>SRE Agent — 인시던트 보고서</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0f1117;
-            color: #e4e4e7;
-            line-height: 1.6;
-            padding: 2rem;
+            background: #F4F5F7;
+            color: #172B4D;
+            line-height: 1.7;
         }
-        .container { max-width: 800px; margin: 0 auto; }
-        .header {
-            border-bottom: 1px solid #27272a;
-            padding-bottom: 1rem;
-            margin-bottom: 2rem;
-        }
-        .header h1 { color: #ef4444; font-size: 1.5rem; }
-        .header .incident-id { color: #a1a1aa; font-size: 0.875rem; margin-top: 0.25rem; }
-        .section {
-            background: #18181b;
-            border: 1px solid #27272a;
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-        }
-        .section h2 {
-            color: #fafafa;
-            font-size: 1.1rem;
-            margin-bottom: 1rem;
-            padding-bottom: 0.5rem;
-            border-bottom: 1px solid #27272a;
-        }
-        .meta-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
+
+        /* ── Top bar ── */
+        .topbar {
+            background: #FFFFFF;
+            border-bottom: 1px solid #DFE1E6;
+            padding: 0.75rem 2rem;
+            display: flex;
+            align-items: center;
             gap: 0.75rem;
         }
-        .meta-item label { color: #71717a; font-size: 0.75rem; text-transform: uppercase; }
-        .meta-item .value { color: #e4e4e7; font-size: 0.95rem; margin-top: 0.15rem; }
-        .risk-low { color: #22c55e; }
-        .risk-medium { color: #f59e0b; }
-        .risk-high { color: #f97316; }
-        .risk-critical { color: #ef4444; }
-        .report-content {
-            font-size: 0.95rem;
-            color: #d4d4d8;
-            max-height: 480px;
-            overflow-y: auto;
-            padding-right: 0.5rem;
-        }
-        .report-content h1, .report-content h2, .report-content h3, .report-content h4 {
-            color: #fafafa;
-            margin: 1rem 0 0.5rem;
-            line-height: 1.3;
-        }
-        .report-content h1 { font-size: 1.25rem; }
-        .report-content h2 { font-size: 1.1rem; }
-        .report-content h3 { font-size: 1rem; color: #e4e4e7; }
-        .report-content h4 { font-size: 0.95rem; color: #d4d4d8; }
-        .report-content p { margin: 0.5rem 0; }
-        .report-content ul, .report-content ol { margin: 0.5rem 0 0.5rem 1.5rem; }
-        .report-content li { margin: 0.25rem 0; }
-        .report-content code {
-            background: #27272a;
-            color: #fbbf24;
-            padding: 0.1rem 0.35rem;
-            border-radius: 3px;
-            font-family: 'Fira Code', 'Cascadia Code', monospace;
-            font-size: 0.85em;
-        }
-        .report-content pre {
-            background: #09090b;
-            border: 1px solid #27272a;
-            padding: 0.75rem;
-            border-radius: 6px;
-            overflow-x: auto;
-            margin: 0.75rem 0;
-        }
-        .report-content pre code {
-            background: transparent;
-            color: #d4d4d8;
-            padding: 0;
-        }
-        .report-content table {
-            border-collapse: collapse;
-            width: 100%;
-            margin: 0.75rem 0;
-            font-size: 0.85rem;
-        }
-        .report-content th, .report-content td {
-            border: 1px solid #27272a;
-            padding: 0.5rem 0.75rem;
-            text-align: left;
-        }
-        .report-content th { background: #18181b; color: #fafafa; }
-        .report-content strong { color: #fafafa; }
+        .topbar-logo { font-weight: 700; font-size: 1.1rem; color: #0052CC; letter-spacing: -0.02em; }
+        .topbar-sep  { color: #C1C7D0; font-size: 1.2rem; font-weight: 300; }
+        .topbar-title { color: #6B778C; font-size: 0.9rem; }
 
-        /* Runbook execution panel */
-        .runbook-panel {
-            background: #052e16;
-            border: 1px solid #22c55e;
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
+        /* ── Page layout ── */
+        .page-wrapper { max-width: 960px; margin: 0 auto; padding: 2rem 2rem 4rem; }
+
+        /* ── Page header ── */
+        .page-header { margin-bottom: 1.5rem; }
+        .page-header h1 { font-size: 1.65rem; font-weight: 600; color: #172B4D; margin-bottom: 0.35rem; }
+        .page-header .subtitle { font-size: 0.85rem; color: #6B778C; }
+        .page-header .subtitle span { margin-right: 1.25rem; }
+
+        /* ── Card ── */
+        .card {
+            background: #FFFFFF;
+            border: 1px solid #DFE1E6;
+            border-radius: 3px;
+            margin-bottom: 1.25rem;
+            box-shadow: 0 1px 1px rgba(9, 30, 66, 0.08);
         }
-        .runbook-panel.no-match {
-            background: #422006;
-            border-color: #f59e0b;
-        }
-        .runbook-panel.missing-script {
-            background: #422006;
-            border-color: #f59e0b;
-        }
-        .runbook-panel h2 {
-            color: #fafafa;
-            font-size: 1.15rem;
-            margin-bottom: 0.75rem;
+        .card-header {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid #DFE1E6;
             display: flex;
             align-items: center;
             gap: 0.5rem;
         }
-        .runbook-panel .runbook-meta {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0.5rem 1rem;
-            margin: 0.75rem 0 1rem;
-            font-size: 0.875rem;
+        .card-header h2 { font-size: 1rem; font-weight: 600; color: #172B4D; }
+        .card-body { padding: 1.25rem; }
+
+        /* ── Info panel ── */
+        .info-panel {
+            border-left: 3px solid #0052CC;
+            background: #DEEBFF;
+            border-radius: 3px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1.25rem;
         }
-        .runbook-panel .runbook-meta label {
-            color: #a1a1aa;
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
+        .info-panel.success  { border-left-color: #00875A; background: #E3FCEF; }
+        .info-panel.warning  { border-left-color: #FF8B00; background: #FFFAE6; }
+        .info-panel.danger   { border-left-color: #DE350B; background: #FFEBE6; }
+        .info-panel .panel-title { font-weight: 600; font-size: 0.9rem; color: #172B4D; margin-bottom: 0.35rem; }
+        .info-panel .panel-text  { font-size: 0.875rem; color: #42526E; }
+
+        /* ── Meta grid ── */
+        .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        .meta-item label {
+            display: block; font-size: 0.7rem; font-weight: 600; color: #6B778C;
+            text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.15rem;
         }
-        .runbook-panel .runbook-meta .value {
-            color: #fafafa;
-            font-weight: 600;
+        .meta-item .value { font-size: 0.95rem; color: #172B4D; font-weight: 500; }
+
+        /* ── Lozenge ── */
+        .lozenge {
+            display: inline-block; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.04em; padding: 0.15rem 0.5rem; border-radius: 3px;
         }
-        .runbook-panel .runbook-rationale {
-            color: #d4d4d8;
-            font-size: 0.9rem;
-            margin: 0.5rem 0 1rem;
-            padding: 0.75rem 1rem;
-            background: rgba(0, 0, 0, 0.25);
-            border-left: 3px solid #22c55e;
-            border-radius: 4px;
+        .lozenge-blue   { background: #DEEBFF; color: #0747A6; }
+        .lozenge-green  { background: #E3FCEF; color: #006644; }
+        .lozenge-yellow { background: #FFF0B3; color: #172B4D; }
+        .lozenge-red    { background: #FFEBE6; color: #BF2600; }
+        .lozenge-gray   { background: #DFE1E6; color: #42526E; }
+        .lozenge-purple { background: #EAE6FF; color: #403294; }
+
+        /* ── Risk ── */
+        .risk-low      { background: #E3FCEF; color: #006644; }
+        .risk-medium   { background: #FFF0B3; color: #172B4D; }
+        .risk-high     { background: #FFEBE6; color: #BF2600; }
+        .risk-critical { background: #FFEBE6; color: #BF2600; font-weight: 700; }
+
+        /* ── Runbook meta ── */
+        .runbook-meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem 1.5rem; margin-bottom: 1rem; }
+        .runbook-section .section-label {
+            font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.04em; color: #6B778C; margin-bottom: 0.3rem;
         }
-        .runbook-panel.no-match .runbook-rationale,
-        .runbook-panel.missing-script .runbook-rationale {
-            border-left-color: #f59e0b;
+        .runbook-section .section-value { font-size: 0.9rem; color: #172B4D; }
+
+        .rationale-block {
+            background: #F4F5F7; border-left: 3px solid #0052CC; border-radius: 3px;
+            padding: 0.75rem 1rem; margin-bottom: 0.75rem; font-size: 0.875rem; color: #42526E;
         }
+        .rationale-block strong { color: #172B4D; }
+
+        /* ── Script block ── */
         .script-label {
-            color: #a1a1aa;
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            margin: 1rem 0 0.4rem;
+            font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.04em; color: #6B778C; margin: 1rem 0 0.4rem;
         }
         .script-block {
-            background: #09090b;
-            border: 1px solid #3f3f46;
-            border-radius: 6px;
-            padding: 1rem;
-            font-family: 'Fira Code', 'Cascadia Code', monospace;
-            font-size: 0.85rem;
-            color: #e4e4e7;
-            overflow-x: auto;
-            white-space: pre;
-            max-height: 360px;
-            overflow-y: auto;
+            background: #172B4D; border-radius: 3px; padding: 1rem 1.25rem;
+            font-family: 'SFMono-Regular', 'Fira Code', 'Cascadia Code', monospace;
+            font-size: 0.82rem; color: #B3D4FF; overflow-x: auto; white-space: pre;
+            max-height: 360px; overflow-y: auto; line-height: 1.5;
         }
         .script-missing {
-            color: #fbbf24;
-            font-size: 0.875rem;
-            padding: 0.75rem 1rem;
-            background: rgba(0, 0, 0, 0.25);
-            border-radius: 6px;
-            border-left: 3px solid #f59e0b;
+            background: #FFFAE6; border-left: 3px solid #FF8B00; border-radius: 3px;
+            padding: 0.75rem 1rem; font-size: 0.875rem; color: #42526E;
         }
-        .alt-list { margin: 0.75rem 0 0 1.25rem; color: #d4d4d8; }
-        .alt-list li { margin: 0.4rem 0; }
-        .actions {
-            display: flex;
-            gap: 1rem;
-            margin-top: 2rem;
+
+        .alt-list { margin: 0.5rem 0 0 1.25rem; color: #42526E; font-size: 0.9rem; }
+        .alt-list li { margin: 0.35rem 0; }
+
+        /* ── Report content ── */
+        .report-content {
+            font-size: 0.925rem; color: #172B4D; max-height: 600px;
+            overflow-y: auto; padding-right: 0.5rem;
         }
+        .report-content h1, .report-content h2, .report-content h3, .report-content h4 {
+            color: #172B4D; margin: 1.25rem 0 0.5rem; line-height: 1.3;
+        }
+        .report-content h1 { font-size: 1.35rem; border-bottom: 1px solid #DFE1E6; padding-bottom: 0.4rem; }
+        .report-content h2 { font-size: 1.15rem; }
+        .report-content h3 { font-size: 1rem; color: #42526E; }
+        .report-content h4 { font-size: 0.95rem; color: #6B778C; }
+        .report-content p { margin: 0.5rem 0; }
+        .report-content ul, .report-content ol { margin: 0.5rem 0 0.5rem 1.5rem; }
+        .report-content li { margin: 0.25rem 0; }
+        .report-content code {
+            background: #F4F5F7; color: #403294; padding: 0.12rem 0.4rem;
+            border-radius: 3px; font-family: 'SFMono-Regular', 'Fira Code', monospace; font-size: 0.85em;
+        }
+        .report-content pre {
+            background: #172B4D; border-radius: 3px; padding: 0.85rem 1rem;
+            overflow-x: auto; margin: 0.75rem 0;
+        }
+        .report-content pre code { background: transparent; color: #B3D4FF; padding: 0; }
+        .report-content table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; font-size: 0.85rem; }
+        .report-content th, .report-content td {
+            border: 1px solid #DFE1E6; padding: 0.5rem 0.75rem; text-align: left;
+        }
+        .report-content th { background: #F4F5F7; color: #172B4D; font-weight: 600; }
+        .report-content strong { color: #172B4D; }
+        .report-content blockquote {
+            border-left: 3px solid #DFE1E6; padding: 0.5rem 1rem; margin: 0.75rem 0;
+            color: #6B778C; background: #FAFBFC; border-radius: 0 3px 3px 0;
+        }
+
+        /* ── Action buttons ── */
+        .actions { display: flex; gap: 0.75rem; margin-top: 1.75rem; flex-wrap: wrap; }
         .btn {
-            padding: 0.75rem 2rem;
-            border: none;
-            border-radius: 6px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: opacity 0.15s;
+            padding: 0.6rem 1.5rem; border: none; border-radius: 3px;
+            font-size: 0.875rem; font-weight: 600; cursor: pointer;
+            transition: background 0.15s, box-shadow 0.15s;
+            display: inline-flex; align-items: center; gap: 0.4rem;
         }
-        .btn:hover { opacity: 0.85; }
-        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-        .btn-approve { background: #22c55e; color: #000; }
-        .btn-reject { background: #3f3f46; color: #e4e4e7; }
-        .status-msg {
-            margin-top: 1rem;
-            padding: 1rem;
-            border-radius: 6px;
-            display: none;
-        }
-        .status-success { background: #052e16; border: 1px solid #22c55e; color: #22c55e; display: block; }
-        .status-error { background: #450a0a; border: 1px solid #ef4444; color: #ef4444; display: block; }
-        .status-rejected { background: #27272a; border: 1px solid #71717a; color: #a1a1aa; display: block; }
+        .btn:hover { box-shadow: 0 1px 2px rgba(9, 30, 66, 0.2); }
+        .btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+        .btn:active:not(:disabled) { transform: translateY(1px); }
+        .btn-primary   { background: #0052CC; color: #FFFFFF; }
+        .btn-primary:hover:not(:disabled) { background: #0065FF; }
+        .btn-success   { background: #00875A; color: #FFFFFF; }
+        .btn-success:hover:not(:disabled) { background: #006644; }
+        .btn-warning   { background: #FF8B00; color: #FFFFFF; }
+        .btn-warning:hover:not(:disabled) { background: #FF991F; }
+        .btn-default   { background: #F4F5F7; color: #42526E; border: 1px solid #DFE1E6; }
+        .btn-default:hover:not(:disabled) { background: #EBECF0; }
+        .btn-rca       { background: #403294; color: #FFFFFF; }
+        .btn-rca:hover:not(:disabled) { background: #5243AA; }
+
+        /* ── Status messages ── */
+        .status-msg { margin-top: 1rem; padding: 0.85rem 1rem; border-radius: 3px; font-size: 0.9rem; display: none; }
+        .status-success { background: #E3FCEF; border: 1px solid #ABF5D1; color: #006644; display: block; }
+        .status-error   { background: #FFEBE6; border: 1px solid #FFBDAD; color: #BF2600; display: block; }
+        .status-info    { background: #DEEBFF; border: 1px solid #B3D4FF; color: #0747A6; display: block; }
+        .status-purple  { background: #EAE6FF; border: 1px solid #C0B6F2; color: #403294; display: block; }
+
+        /* ── Expired banner ── */
         .expired-banner {
-            background: #451a03;
-            border: 1px solid #f59e0b;
-            color: #f59e0b;
-            padding: 1rem;
-            border-radius: 6px;
-            text-align: center;
-            margin-bottom: 1.5rem;
+            background: #FFFAE6; border: 1px solid #FFE380; color: #172B4D;
+            padding: 0.85rem 1.25rem; border-radius: 3px; border-left: 3px solid #FF8B00;
+            margin-bottom: 1.25rem; font-size: 0.9rem;
+        }
+
+        /* ── Visualization overrides for Confluence style ── */
+        #vizRoot .section {
+            background: #FFFFFF; border: 1px solid #DFE1E6; border-radius: 3px;
+            padding: 1.25rem; margin-bottom: 1.25rem;
+            box-shadow: 0 1px 1px rgba(9, 30, 66, 0.08);
+        }
+        #vizRoot .section h2 { font-size: 1rem; font-weight: 600; color: #172B4D; }
+
+        @media (max-width: 640px) {
+            .page-wrapper { padding: 1rem; }
+            .meta-grid, .runbook-meta-grid { grid-template-columns: 1fr; }
+            .actions { flex-direction: column; }
+            .btn { width: 100%; justify-content: center; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>SRE Agent — 조치 승인</h1>
-            <div class="incident-id">{{ incident_id }}</div>
+    <!-- Top bar -->
+    <div class="topbar">
+        <span class="topbar-logo">SRE Agent</span>
+        <span class="topbar-sep">/</span>
+        <span class="topbar-title">인시던트 보고서</span>
+    </div>
+
+    <div class="page-wrapper">
+        <!-- Page header -->
+        <div class="page-header">
+            <h1>인시던트 분석 보고서</h1>
+            <div class="subtitle">
+                <span>{{ incident_id }}</span>
+                <span>{{ elapsed_seconds }}s 소요</span>
+                <span>
+                    {% if status == 'approved' %}
+                    <span class="lozenge lozenge-green">승인됨</span>
+                    {% elif status == 'rejected' %}
+                    <span class="lozenge lozenge-gray">거부됨</span>
+                    {% elif status == 'manual_action' %}
+                    <span class="lozenge lozenge-yellow">수동조치예정</span>
+                    {% elif status == 'rca_running' %}
+                    <span class="lozenge lozenge-purple">RCA 분석 중</span>
+                    {% elif status == 'rca_completed' %}
+                    <span class="lozenge lozenge-purple">RCA 완료</span>
+                    {% else %}
+                    <span class="lozenge lozenge-blue">대기 중</span>
+                    {% endif %}
+                </span>
+            </div>
         </div>
 
         {% if expired %}
         <div class="expired-banner">
-            ⏰ 승인 시간이 만료되었습니다. 새로운 분석을 실행하거나 수동으로 조치하세요.
+            승인 시간이 만료되었습니다. 새로운 분석을 실행하거나 수동으로 조치하세요.
         </div>
         {% endif %}
 
-        <div class="section">
-            <h2>인시던트 요약</h2>
-            <div class="meta-grid">
-                <div class="meta-item">
-                    <label>인시던트 ID</label>
-                    <div class="value">{{ incident_id }}</div>
-                </div>
-                <div class="meta-item">
-                    <label>분석 레벨</label>
-                    <div class="value">{{ analysis_level }}</div>
-                </div>
-                <div class="meta-item">
-                    <label>소요 시간</label>
-                    <div class="value">{{ elapsed_seconds }}s</div>
-                </div>
-                <div class="meta-item">
-                    <label>상태</label>
-                    <div class="value">{{ status }}</div>
+        <!-- Incident summary -->
+        <div class="card">
+            <div class="card-header">
+                <h2>인시던트 요약</h2>
+            </div>
+            <div class="card-body">
+                <div class="meta-grid">
+                    <div class="meta-item">
+                        <label>인시던트 ID</label>
+                        <div class="value">{{ incident_id }}</div>
+                    </div>
+                    <div class="meta-item">
+                        <label>분석 레벨</label>
+                        <div class="value">{{ analysis_level }}</div>
+                    </div>
+                    <div class="meta-item">
+                        <label>소요 시간</label>
+                        <div class="value">{{ elapsed_seconds }}s</div>
+                    </div>
+                    <div class="meta-item">
+                        <label>상태</label>
+                        <div class="value">{{ status }}</div>
+                    </div>
                 </div>
             </div>
         </div>
 
+        <!-- Runbook panel: MATCH -->
         {% if runbook.status == 'match' %}
-        <div class="runbook-panel{% if not runbook.script_exists %} missing-script{% endif %}">
-            <h2>{% if runbook.script_exists %}▶ 실행될 조치{% else %}⚠ 매칭된 조치 (수동 실행 필요){% endif %}</h2>
-
-            <div class="runbook-meta">
-                <div>
-                    <label>Runbook</label>
-                    <div class="value">{{ runbook.name }}</div>
-                </div>
-                <div>
-                    <label>Risk</label>
-                    <div class="value risk-{{ runbook.risk }}">{{ runbook.risk }}</div>
-                </div>
-                <div>
-                    <label>대상 호스트</label>
-                    <div class="value">{{ runbook.target_host_label or '—' }}</div>
-                </div>
-                <div>
-                    <label>스크립트 경로</label>
-                    <div class="value">{{ runbook.script_path or '—' }}</div>
-                </div>
+        <div class="{% if runbook.script_exists %}info-panel success{% else %}info-panel warning{% endif %}" style="margin-bottom: 0.5rem;">
+            <div class="panel-title">
+                {% if runbook.script_exists %}
+                매칭된 Runbook이 있습니다 — 자동 실행이 가능합니다.
+                {% else %}
+                매칭된 Runbook이 있지만 스크립트가 누락되어 수동 실행이 필요합니다.
+                {% endif %}
             </div>
-
-            {% if runbook.why %}
-            <div class="runbook-rationale">
-                <strong>왜 이 조치인가:</strong> {{ runbook.why }}
-            </div>
-            {% endif %}
-
-            {% if runbook.what %}
-            <div class="runbook-rationale">
-                <strong>무엇을 하는가:</strong> {{ runbook.what }}
-            </div>
-            {% endif %}
-
-            <div class="script-label">실행될 스크립트 내용</div>
-            {% if runbook.script_exists %}
-            <pre class="script-block">{{ runbook.script_body }}</pre>
-            {% else %}
-            <div class="script-missing">{{ runbook.script_missing_reason }}</div>
-            {% endif %}
         </div>
+        <div class="card">
+            <div class="card-header">
+                <h2>Runbook 매칭 결과</h2>
+                <span class="lozenge lozenge-green" style="margin-left: auto;">MATCH</span>
+            </div>
+            <div class="card-body">
+                <div class="runbook-meta-grid">
+                    <div class="runbook-section">
+                        <div class="section-label">Runbook</div>
+                        <div class="section-value" style="font-weight: 600;">{{ runbook.name }}</div>
+                    </div>
+                    <div class="runbook-section">
+                        <div class="section-label">Risk</div>
+                        <div class="section-value">
+                            <span class="lozenge risk-{{ runbook.risk }}">{{ runbook.risk }}</span>
+                        </div>
+                    </div>
+                    <div class="runbook-section">
+                        <div class="section-label">대상 호스트</div>
+                        <div class="section-value">{{ runbook.target_host_label or '—' }}</div>
+                    </div>
+                    <div class="runbook-section">
+                        <div class="section-label">스크립트 경로</div>
+                        <div class="section-value" style="font-family: monospace; font-size: 0.85rem;">{{ runbook.script_path or '—' }}</div>
+                    </div>
+                </div>
+
+                {% if runbook.why %}
+                <div class="rationale-block">
+                    <strong>왜 이 조치인가</strong><br>{{ runbook.why }}
+                </div>
+                {% endif %}
+
+                {% if runbook.what %}
+                <div class="rationale-block">
+                    <strong>무엇을 하는가</strong><br>{{ runbook.what }}
+                </div>
+                {% endif %}
+
+                {% if runbook.script_exists %}
+                <div class="script-label">실행될 스크립트 내용</div>
+                <pre class="script-block">{{ runbook.script_body }}</pre>
+                {% else %}
+                <div class="script-label">스크립트 상태</div>
+                <div class="script-missing">{{ runbook.script_missing_reason }}</div>
+                {% endif %}
+            </div>
+        </div>
+
         {% elif runbook.status == 'no_match' %}
-        <div class="runbook-panel no-match">
-            <h2>⚠ 자동 실행 가능한 Runbook 없음</h2>
-            {% if runbook.reason %}
-            <div class="runbook-rationale">{{ runbook.reason }}</div>
-            {% endif %}
-            {% if runbook.alternatives %}
-            <div class="script-label">수동 대안</div>
-            <ol class="alt-list">
-                {% for alt in runbook.alternatives %}
-                <li>{{ alt }}</li>
-                {% endfor %}
-            </ol>
-            {% endif %}
+        <!-- Runbook panel: NO MATCH -->
+        <div class="info-panel warning" style="margin-bottom: 0.5rem;">
+            <div class="panel-title">자동 실행 가능한 Runbook이 없습니다.</div>
+            <div class="panel-text">RCA 분석 결과를 확인하고 수동으로 조치하세요.</div>
+        </div>
+        <div class="card">
+            <div class="card-header">
+                <h2>Runbook 매칭 결과</h2>
+                <span class="lozenge lozenge-yellow" style="margin-left: auto;">NO MATCH</span>
+            </div>
+            <div class="card-body">
+                {% if runbook.reason %}
+                <div class="rationale-block" style="border-left-color: #FF8B00;">
+                    {{ runbook.reason }}
+                </div>
+                {% endif %}
+                {% if runbook.alternatives %}
+                <div class="section-label" style="font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #6B778C; margin-bottom: 0.3rem;">수동 대안</div>
+                <ol class="alt-list">
+                    {% for alt in runbook.alternatives %}
+                    <li>{{ alt }}</li>
+                    {% endfor %}
+                </ol>
+                {% endif %}
+            </div>
         </div>
         {% endif %}
 
+        <!-- Visualization -->
         {% if metrics_json %}
         <div id="vizRoot"></div>
         {% endif %}
 
-        <div class="section">
-            <h2>분석 리포트</h2>
-            {% if report_html %}
-            <div class="report-content">{{ report_html|safe }}</div>
-            {% else %}
-            <div class="report-content" style="white-space: pre-wrap;">{{ report_plain }}</div>
-            {% endif %}
+        <!-- Analysis report -->
+        <div class="card">
+            <div class="card-header">
+                <h2>분석 리포트</h2>
+            </div>
+            <div class="card-body">
+                {% if report_html %}
+                <div class="report-content">{{ report_html|safe }}</div>
+                {% else %}
+                <div class="report-content" style="white-space: pre-wrap;">{{ report_plain }}</div>
+                {% endif %}
+            </div>
         </div>
 
+        <!-- RCA Phase B: running -->
         {% if phase == 'rca_running' %}
-        <div class="section" style="border-color: #3b82f6;">
-            <h2 style="color: #60a5fa;">🔍 RCA 분석 진행 중...</h2>
-            <p style="color: #a1a1aa;">근본 원인 분석이 진행되고 있습니다. 페이지를 새로고침하면 결과를 확인할 수 있습니다.</p>
-            <button class="btn" style="background: #3b82f6; color: #fff; margin-top: 1rem;" onclick="location.reload()">🔄 새로고침</button>
+        <div class="info-panel" style="margin-bottom: 0.5rem;">
+            <div class="panel-title">RCA 분석 진행 중...</div>
+            <div class="panel-text">근본 원인 분석이 진행되고 있습니다. 페이지를 새로고침하면 결과를 확인할 수 있습니다.</div>
+        </div>
+        <div style="margin-bottom: 1.25rem;">
+            <button class="btn btn-primary" onclick="location.reload()">새로고침</button>
         </div>
         {% elif phase == 'rca_completed' and rca_report_html %}
-        <div class="section" style="border-color: #3b82f6;">
-            <h2 style="color: #60a5fa;">🔍 RCA 분석 결과</h2>
-            <div class="report-content">{{ rca_report_html|safe }}</div>
+        <!-- RCA Phase B: completed -->
+        <div class="card">
+            <div class="card-header">
+                <h2>RCA 분석 결과</h2>
+                <span class="lozenge lozenge-purple" style="margin-left: auto;">COMPLETED</span>
+            </div>
+            <div class="card-body">
+                <div class="report-content">{{ rca_report_html|safe }}</div>
+            </div>
         </div>
         {% endif %}
 
-        {% if not expired and phase == 'phase_a_complete' and runbook.status == 'match' and runbook.script_exists %}
-        <div class="actions">
-            <button class="btn btn-approve" id="approveBtn" onclick="submitApproval('approve')">
-                ✅ 조치 승인 및 실행
-            </button>
-            <button class="btn" id="rcaBtn" onclick="submitApproval('rca')" style="background: #3b82f6; color: #fff;">
-                🔍 RCA 진행
-            </button>
-            <button class="btn btn-reject" id="rejectBtn" onclick="submitApproval('reject')">
-                ❌ 거부
-            </button>
-        </div>
-        {% elif not expired and phase == 'phase_a_complete' %}
-        <div class="actions">
-            <button class="btn" id="rcaBtn" onclick="submitApproval('rca')" style="background: #3b82f6; color: #fff;">
-                🔍 RCA 진행
-            </button>
-            <button class="btn btn-reject" id="rejectBtn" onclick="submitApproval('reject')">
-                확인 (수동 조치 필요)
-            </button>
-        </div>
-        {% elif not expired and status != 'approved' and status != 'rejected' and status != 'rca_running' and status != 'rca_completed' and runbook.status == 'match' and runbook.script_exists %}
-        <div class="actions">
-            <button class="btn btn-approve" id="approveBtn" onclick="submitApproval('approve')">
-                ✅ 조치 승인 및 실행
-            </button>
-            <button class="btn btn-reject" id="rejectBtn" onclick="submitApproval('reject')">
-                ❌ 거부
-            </button>
+        <!-- ── Action buttons ── -->
+        {% if not expired and status not in ['approved', 'rejected', 'manual_action', 'rca_running'] %}
+        <div class="card">
+            <div class="card-header">
+                <h2>조치 선택</h2>
+            </div>
+            <div class="card-body">
+                {% if runbook.status == 'match' and runbook.script_exists %}
+                <p style="font-size: 0.9rem; color: #42526E; margin-bottom: 1rem;">
+                    매칭된 Runbook을 자동 실행하거나, RCA 근본 원인 분석을 진행하거나, 수동 조치를 선택할 수 있습니다.
+                </p>
+                {% else %}
+                <p style="font-size: 0.9rem; color: #42526E; margin-bottom: 1rem;">
+                    RCA 근본 원인 분석을 진행하거나, 수동 조치 계획을 선택하세요.
+                </p>
+                {% endif %}
+                <div class="actions">
+                    <button class="btn btn-success" id="runbookBtn" onclick="submitAction('approve')"
+                        {% if not (runbook.status == 'match' and runbook.script_exists) %}disabled title="매칭된 Runbook이 없습니다"{% endif %}>
+                        조치승인
+                    </button>
+                    {% if rca_callback_available and phase != 'rca_completed' %}
+                    <button class="btn btn-rca" id="rcaBtn" onclick="submitAction('rca')">
+                        RCA 분석
+                    </button>
+                    {% endif %}
+                    <button class="btn btn-default" id="manualBtn" onclick="submitAction('manual_action')">
+                        수동조치예정
+                    </button>
+                </div>
+            </div>
         </div>
         {% endif %}
 
@@ -385,9 +455,8 @@
         const V = {{ metrics_json|safe }};
         const root = document.getElementById('vizRoot');
         if(!root) return;
-        const C = ['#3b82f6','#22c55e','#f59e0b'];
+        const C = ['#0052CC','#00875A','#FF8B00'];
 
-        /* ── Helper: draw a line chart on canvas ── */
         function drawChart(canvas, points, color, unit){
             const ctx = canvas.getContext('2d');
             const W = canvas.width = canvas.parentElement.clientWidth;
@@ -405,31 +474,26 @@
             function x(t){return pad.l+(new Date(t).getTime()-tMin)/tRange*cw;}
             function y(v){return pad.t+ch-(v-yMin)/yRange*ch;}
 
-            // Background
-            ctx.fillStyle='#09090b'; ctx.fillRect(0,0,W,H);
-            // Grid
-            ctx.strokeStyle='#27272a'; ctx.lineWidth=1;
+            ctx.fillStyle='#FFFFFF'; ctx.fillRect(0,0,W,H);
+            ctx.strokeStyle='#DFE1E6'; ctx.lineWidth=1;
             for(let i=0;i<=4;i++){
                 const gy=pad.t+ch/4*i;
                 ctx.beginPath();ctx.moveTo(pad.l,gy);ctx.lineTo(W-pad.r,gy);ctx.stroke();
-                ctx.fillStyle='#71717a';ctx.font='11px sans-serif';ctx.textAlign='right';
+                ctx.fillStyle='#6B778C';ctx.font='11px sans-serif';ctx.textAlign='right';
                 ctx.fillText((yMax-yRange/4*i).toFixed(1)+(unit||''),pad.l-6,gy+4);
             }
-            // Time labels
             const tSteps=Math.min(points.length,6);
-            ctx.fillStyle='#71717a';ctx.font='10px sans-serif';ctx.textAlign='center';
+            ctx.fillStyle='#6B778C';ctx.font='10px sans-serif';ctx.textAlign='center';
             for(let i=0;i<tSteps;i++){
                 const idx=Math.floor(i/(tSteps-1)*(points.length-1));
                 const d=new Date(points[idx].t);
                 ctx.fillText(d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0'),x(points[idx].t),H-4);
             }
-            // Fill
             ctx.beginPath();ctx.moveTo(x(points[0].t),y(points[0].v));
             points.forEach(p=>ctx.lineTo(x(p.t),y(p.v)));
             ctx.lineTo(x(points[points.length-1].t),pad.t+ch);
             ctx.lineTo(x(points[0].t),pad.t+ch);ctx.closePath();
             ctx.fillStyle=color+'18';ctx.fill();
-            // Line
             ctx.beginPath();ctx.moveTo(x(points[0].t),y(points[0].v));
             points.forEach(p=>ctx.lineTo(x(p.t),y(p.v)));
             ctx.strokeStyle=color;ctx.lineWidth=2;ctx.stroke();
@@ -447,23 +511,22 @@
             const avg=vals.reduce((a,b)=>a+b,0)/vals.length;
             const cur=vals[vals.length-1];
             const u=unit||'';
-            return '<div style="display:flex;gap:1.5rem;margin-top:0.5rem;font-size:0.8rem;color:#a1a1aa;">'+
-                '<span>현재: <strong style="color:#fafafa">'+cur.toFixed(1)+u+'</strong></span>'+
-                '<span>평균: <strong style="color:#fafafa">'+avg.toFixed(1)+u+'</strong></span>'+
-                '<span>최소: <strong style="color:#22c55e">'+min.toFixed(1)+u+'</strong></span>'+
-                '<span>최대: <strong style="color:#ef4444">'+max.toFixed(1)+u+'</strong></span></div>';
+            return '<div style="display:flex;gap:1.5rem;margin-top:0.5rem;font-size:0.8rem;color:#6B778C;">'+
+                '<span>현재: <strong style="color:#172B4D">'+cur.toFixed(1)+u+'</strong></span>'+
+                '<span>평균: <strong style="color:#172B4D">'+avg.toFixed(1)+u+'</strong></span>'+
+                '<span>최소: <strong style="color:#00875A">'+min.toFixed(1)+u+'</strong></span>'+
+                '<span>최대: <strong style="color:#DE350B">'+max.toFixed(1)+u+'</strong></span></div>';
         }
 
-        /* ── 1. Charts (time-series) ── */
         if(V.charts && V.charts.length){
             const s=section('메트릭 추이','📈');
             V.charts.forEach(function(m,i){
                 if(!m.data||!m.data.length)return;
                 const lbl=document.createElement('div');
-                lbl.style.cssText='color:#a1a1aa;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;margin:1rem 0 0.4rem;';
+                lbl.style.cssText='color:#6B778C;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;margin:1rem 0 0.4rem;';
                 lbl.textContent=m.label;s.appendChild(lbl);
                 const cw=document.createElement('div');
-                cw.style.cssText='border:1px solid #27272a;border-radius:6px;overflow:hidden;';
+                cw.style.cssText='border:1px solid #DFE1E6;border-radius:3px;overflow:hidden;';
                 const cv=document.createElement('canvas');cw.appendChild(cv);s.appendChild(cw);
                 drawChart(cv,m.data,C[i%3],m.unit||'');
                 const st=document.createElement('div');
@@ -471,30 +534,28 @@
             });
         }
 
-        /* ── 2. Process table ── */
         if(V.processes && V.processes.length){
             const s=section('프로세스 현황 (상위 리소스 소비)','⚙️');
             let h='<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:0.85rem;margin-top:0.5rem;">'+
-                '<thead><tr style="background:#18181b;"><th style="padding:0.5rem;border:1px solid #27272a;text-align:left;">PID</th>'+
-                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:left;">프로세스</th>'+
-                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:right;">CPU %</th>'+
-                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:right;">MEM %</th>'+
-                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:left;">커맨드</th></tr></thead><tbody>';
+                '<thead><tr style="background:#F4F5F7;"><th style="padding:0.5rem;border:1px solid #DFE1E6;text-align:left;">PID</th>'+
+                '<th style="padding:0.5rem;border:1px solid #DFE1E6;text-align:left;">프로세스</th>'+
+                '<th style="padding:0.5rem;border:1px solid #DFE1E6;text-align:right;">CPU %</th>'+
+                '<th style="padding:0.5rem;border:1px solid #DFE1E6;text-align:right;">MEM %</th>'+
+                '<th style="padding:0.5rem;border:1px solid #DFE1E6;text-align:left;">커맨드</th></tr></thead><tbody>';
             V.processes.forEach(function(p){
-                const cpuColor=p.cpu>80?'#ef4444':p.cpu>50?'#f59e0b':'#e4e4e7';
-                const memColor=p.mem>80?'#ef4444':p.mem>50?'#f59e0b':'#e4e4e7';
-                h+='<tr><td style="padding:0.4rem 0.5rem;border:1px solid #27272a;">'+p.pid+'</td>'+
-                    '<td style="padding:0.4rem 0.5rem;border:1px solid #27272a;font-weight:600;">'+p.name+'</td>'+
-                    '<td style="padding:0.4rem 0.5rem;border:1px solid #27272a;text-align:right;color:'+cpuColor+';">'+p.cpu.toFixed(1)+'</td>'+
-                    '<td style="padding:0.4rem 0.5rem;border:1px solid #27272a;text-align:right;color:'+memColor+';">'+p.mem.toFixed(1)+'</td>'+
-                    '<td style="padding:0.4rem 0.5rem;border:1px solid #27272a;color:#a1a1aa;font-size:0.8rem;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+
+                const cpuColor=p.cpu>80?'#DE350B':p.cpu>50?'#FF8B00':'#172B4D';
+                const memColor=p.mem>80?'#DE350B':p.mem>50?'#FF8B00':'#172B4D';
+                h+='<tr><td style="padding:0.4rem 0.5rem;border:1px solid #DFE1E6;">'+p.pid+'</td>'+
+                    '<td style="padding:0.4rem 0.5rem;border:1px solid #DFE1E6;font-weight:600;">'+p.name+'</td>'+
+                    '<td style="padding:0.4rem 0.5rem;border:1px solid #DFE1E6;text-align:right;color:'+cpuColor+';">'+p.cpu.toFixed(1)+'</td>'+
+                    '<td style="padding:0.4rem 0.5rem;border:1px solid #DFE1E6;text-align:right;color:'+memColor+';">'+p.mem.toFixed(1)+'</td>'+
+                    '<td style="padding:0.4rem 0.5rem;border:1px solid #DFE1E6;color:#6B778C;font-size:0.8rem;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+
                     (p.command||'')+'</td></tr>';
             });
             h+='</tbody></table></div>';
             s.insertAdjacentHTML('beforeend',h);
         }
 
-        /* ── 3. Network status ── */
         if(V.network){
             const s=section('네트워크 상태','🌐');
             if(V.network.summary){
@@ -502,77 +563,75 @@
                 Object.entries(V.network.summary).forEach(function(e){
                     const st=e[0],cnt=e[1];
                     const warn=(st==='CLOSE_WAIT'||st==='TIME_WAIT')&&cnt>20;
-                    const bg=warn?'#451a03':'#18181b';
-                    const bc=warn?'#f59e0b':'#27272a';
-                    h+='<div style="background:'+bg+';border:1px solid '+bc+';border-radius:6px;padding:0.6rem 1rem;min-width:100px;">'+
-                        '<div style="font-size:0.7rem;color:#71717a;text-transform:uppercase;">'+st+'</div>'+
-                        '<div style="font-size:1.3rem;font-weight:700;color:'+(warn?'#f59e0b':'#fafafa')+';">'+cnt+'</div></div>';
+                    const bg=warn?'#FFFAE6':'#FFFFFF';
+                    const bc=warn?'#FF8B00':'#DFE1E6';
+                    h+='<div style="background:'+bg+';border:1px solid '+bc+';border-radius:3px;padding:0.6rem 1rem;min-width:100px;">'+
+                        '<div style="font-size:0.7rem;color:#6B778C;text-transform:uppercase;">'+st+'</div>'+
+                        '<div style="font-size:1.3rem;font-weight:700;color:'+(warn?'#FF8B00':'#172B4D')+';">'+cnt+'</div></div>';
                 });
                 h+='</div>';s.insertAdjacentHTML('beforeend',h);
             }
             if(V.network.stale && V.network.stale.length){
-                let h='<div style="margin-top:1rem;"><div style="color:#f59e0b;font-size:0.8rem;font-weight:600;margin-bottom:0.4rem;">⚠ 비정상 연결</div>'+
+                let h='<div style="margin-top:1rem;"><div style="color:#FF8B00;font-size:0.8rem;font-weight:600;margin-bottom:0.4rem;">비정상 연결</div>'+
                     '<table style="width:100%;border-collapse:collapse;font-size:0.8rem;">'+
-                    '<thead><tr style="background:#451a03;"><th style="padding:0.4rem;border:1px solid #27272a;text-align:left;">로컬</th>'+
-                    '<th style="padding:0.4rem;border:1px solid #27272a;text-align:left;">원격</th>'+
-                    '<th style="padding:0.4rem;border:1px solid #27272a;">상태</th>'+
-                    '<th style="padding:0.4rem;border:1px solid #27272a;">비고</th></tr></thead><tbody>';
+                    '<thead><tr style="background:#FFFAE6;"><th style="padding:0.4rem;border:1px solid #DFE1E6;text-align:left;">로컬</th>'+
+                    '<th style="padding:0.4rem;border:1px solid #DFE1E6;text-align:left;">원격</th>'+
+                    '<th style="padding:0.4rem;border:1px solid #DFE1E6;">상태</th>'+
+                    '<th style="padding:0.4rem;border:1px solid #DFE1E6;">비고</th></tr></thead><tbody>';
                 V.network.stale.forEach(function(c){
-                    h+='<tr><td style="padding:0.3rem 0.4rem;border:1px solid #27272a;">'+c.local+'</td>'+
-                        '<td style="padding:0.3rem 0.4rem;border:1px solid #27272a;">'+c.remote+'</td>'+
-                        '<td style="padding:0.3rem 0.4rem;border:1px solid #27272a;color:#f59e0b;text-align:center;">'+c.state+'</td>'+
-                        '<td style="padding:0.3rem 0.4rem;border:1px solid #27272a;color:#a1a1aa;">'+(c.info||'')+'</td></tr>';
+                    h+='<tr><td style="padding:0.3rem 0.4rem;border:1px solid #DFE1E6;">'+c.local+'</td>'+
+                        '<td style="padding:0.3rem 0.4rem;border:1px solid #DFE1E6;">'+c.remote+'</td>'+
+                        '<td style="padding:0.3rem 0.4rem;border:1px solid #DFE1E6;color:#FF8B00;text-align:center;">'+c.state+'</td>'+
+                        '<td style="padding:0.3rem 0.4rem;border:1px solid #DFE1E6;color:#6B778C;">'+(c.info||'')+'</td></tr>';
                 });
                 h+='</tbody></table></div>';s.insertAdjacentHTML('beforeend',h);
             }
         }
 
-        /* ── 4. Log summary ── */
         if(V.logs){
             const s=section('로그 요약','📋');
             if(V.logs.total_errors!==undefined){
                 const ec=V.logs.total_errors;
-                const bg=ec>100?'#450a0a':ec>10?'#451a03':'#052e16';
-                const bc=ec>100?'#ef4444':ec>10?'#f59e0b':'#22c55e';
-                const fc=ec>100?'#ef4444':ec>10?'#f59e0b':'#22c55e';
+                const bg=ec>100?'#FFEBE6':ec>10?'#FFFAE6':'#E3FCEF';
+                const bc=ec>100?'#DE350B':ec>10?'#FF8B00':'#00875A';
+                const fc=ec>100?'#DE350B':ec>10?'#FF8B00':'#00875A';
                 s.insertAdjacentHTML('beforeend',
-                    '<div style="display:inline-block;background:'+bg+';border:1px solid '+bc+';border-radius:6px;padding:0.6rem 1.2rem;margin-top:0.5rem;">'+
-                    '<span style="font-size:0.7rem;color:#71717a;">총 에러 수</span>'+
+                    '<div style="display:inline-block;background:'+bg+';border:1px solid '+bc+';border-radius:3px;padding:0.6rem 1.2rem;margin-top:0.5rem;">'+
+                    '<span style="font-size:0.7rem;color:#6B778C;">총 에러 수</span>'+
                     '<div style="font-size:1.5rem;font-weight:700;color:'+fc+';">'+ec+'</div></div>');
             }
             if(V.logs.patterns && V.logs.patterns.length){
                 let h='<div style="margin-top:1rem;">';
                 V.logs.patterns.forEach(function(p){
-                    const lc=p.level==='error'?'#ef4444':p.level==='warn'?'#f59e0b':'#3b82f6';
-                    h+='<div style="background:#09090b;border:1px solid #27272a;border-left:3px solid '+lc+';border-radius:4px;padding:0.6rem 1rem;margin-bottom:0.5rem;">'+
+                    const lc=p.level==='error'?'#DE350B':p.level==='warn'?'#FF8B00':'#0052CC';
+                    h+='<div style="background:#FFFFFF;border:1px solid #DFE1E6;border-left:3px solid '+lc+';border-radius:3px;padding:0.6rem 1rem;margin-bottom:0.5rem;">'+
                         '<div style="display:flex;justify-content:space-between;align-items:center;">'+
-                        '<span style="color:#e4e4e7;font-size:0.85rem;">'+p.pattern+'</span>'+
-                        '<span style="background:'+lc+'22;color:'+lc+';padding:0.15rem 0.5rem;border-radius:10px;font-size:0.75rem;font-weight:600;">'+p.count+'건</span>'+
+                        '<span style="color:#172B4D;font-size:0.85rem;">'+p.pattern+'</span>'+
+                        '<span style="background:'+lc+'18;color:'+lc+';padding:0.15rem 0.5rem;border-radius:10px;font-size:0.75rem;font-weight:600;">'+p.count+'건</span>'+
                         '</div></div>';
                 });
                 h+='</div>';s.insertAdjacentHTML('beforeend',h);
             }
         }
 
-        /* ── 5. APM metrics ── */
         if(V.apm && V.apm.services && V.apm.services.length){
             const s=section('APM 서비스 현황','📊');
             let h='<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:0.85rem;margin-top:0.5rem;">'+
-                '<thead><tr style="background:#18181b;">'+
-                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:left;">서비스</th>'+
-                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:right;">평균 응답(ms)</th>'+
-                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:right;">P99(ms)</th>'+
-                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:right;">에러율(%)</th>'+
-                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:right;">TPS</th>'+
+                '<thead><tr style="background:#F4F5F7;">'+
+                '<th style="padding:0.5rem;border:1px solid #DFE1E6;text-align:left;">서비스</th>'+
+                '<th style="padding:0.5rem;border:1px solid #DFE1E6;text-align:right;">평균 응답(ms)</th>'+
+                '<th style="padding:0.5rem;border:1px solid #DFE1E6;text-align:right;">P99(ms)</th>'+
+                '<th style="padding:0.5rem;border:1px solid #DFE1E6;text-align:right;">에러율(%)</th>'+
+                '<th style="padding:0.5rem;border:1px solid #DFE1E6;text-align:right;">TPS</th>'+
                 '</tr></thead><tbody>';
             V.apm.services.forEach(function(sv){
-                const avgC=sv.avg_ms>1000?'#ef4444':sv.avg_ms>500?'#f59e0b':'#e4e4e7';
-                const errC=sv.error_rate>5?'#ef4444':sv.error_rate>1?'#f59e0b':'#22c55e';
-                h+='<tr><td style="padding:0.4rem 0.5rem;border:1px solid #27272a;font-weight:600;">'+sv.name+'</td>'+
-                    '<td style="padding:0.4rem 0.5rem;border:1px solid #27272a;text-align:right;color:'+avgC+';">'+sv.avg_ms+'</td>'+
-                    '<td style="padding:0.4rem 0.5rem;border:1px solid #27272a;text-align:right;">'+sv.p99_ms+'</td>'+
-                    '<td style="padding:0.4rem 0.5rem;border:1px solid #27272a;text-align:right;color:'+errC+';">'+sv.error_rate.toFixed(1)+'</td>'+
-                    '<td style="padding:0.4rem 0.5rem;border:1px solid #27272a;text-align:right;">'+sv.tps+'</td></tr>';
+                const avgC=sv.avg_ms>1000?'#DE350B':sv.avg_ms>500?'#FF8B00':'#172B4D';
+                const errC=sv.error_rate>5?'#DE350B':sv.error_rate>1?'#FF8B00':'#00875A';
+                h+='<tr><td style="padding:0.4rem 0.5rem;border:1px solid #DFE1E6;font-weight:600;">'+sv.name+'</td>'+
+                    '<td style="padding:0.4rem 0.5rem;border:1px solid #DFE1E6;text-align:right;color:'+avgC+';">'+sv.avg_ms+'</td>'+
+                    '<td style="padding:0.4rem 0.5rem;border:1px solid #DFE1E6;text-align:right;">'+sv.p99_ms+'</td>'+
+                    '<td style="padding:0.4rem 0.5rem;border:1px solid #DFE1E6;text-align:right;color:'+errC+';">'+sv.error_rate.toFixed(1)+'</td>'+
+                    '<td style="padding:0.4rem 0.5rem;border:1px solid #DFE1E6;text-align:right;">'+sv.tps+'</td></tr>';
             });
             h+='</tbody></table></div>';s.insertAdjacentHTML('beforeend',h);
         }
@@ -582,11 +641,11 @@
     {% endif %}
 
     <script>
-        async function submitApproval(action) {
-            const btns = document.querySelectorAll('.actions .btn');
-            const statusMsg = document.getElementById('statusMsg');
+        async function submitAction(action) {
+            const buttons = document.querySelectorAll('.actions .btn');
+            buttons.forEach(b => b.disabled = true);
 
-            btns.forEach(b => b.disabled = true);
+            const statusMsg = document.getElementById('statusMsg');
 
             try {
                 const resp = await fetch(window.location.pathname, {
@@ -597,27 +656,41 @@
                 const data = await resp.json();
 
                 statusMsg.className = 'status-msg';
+
                 if (data.status === 'approved') {
                     statusMsg.classList.add('status-success');
-                    statusMsg.textContent = '✅ 승인 완료 — Runbook이 실행됩니다.';
-                } else if (data.status === 'rejected') {
-                    statusMsg.classList.add('status-rejected');
-                    statusMsg.textContent = '❌ 거부됨 — 수동 조치가 필요합니다.';
+                    if (data.execution && data.execution.status === 'completed' && data.execution.success) {
+                        statusMsg.innerHTML = '<strong>Runbook 실행 완료</strong> — ' + (data.execution.runbook || '') + ' 이(가) 성공적으로 실행되었습니다.';
+                    } else if (data.execution && data.execution.status === 'completed') {
+                        statusMsg.classList.remove('status-success');
+                        statusMsg.classList.add('status-error');
+                        statusMsg.innerHTML = '<strong>Runbook 실행 실패</strong> — exit code: ' + (data.execution.exit_code || 'unknown');
+                    } else if (data.execution && data.execution.status === 'skipped') {
+                        statusMsg.innerHTML = '<strong>Runbook 실행 건너뜀</strong> — ' + (data.execution.reason || '');
+                    } else {
+                        statusMsg.innerHTML = '<strong>승인 완료</strong> — Runbook 실행이 처리되었습니다.';
+                    }
                 } else if (data.status === 'rca_started') {
-                    statusMsg.classList.add('status-success');
-                    statusMsg.style.background = '#172554';
-                    statusMsg.style.borderColor = '#3b82f6';
-                    statusMsg.style.color = '#60a5fa';
-                    statusMsg.textContent = '🔍 RCA 분석이 시작되었습니다. 잠시 후 페이지를 새로고침하세요.';
+                    statusMsg.classList.add('status-purple');
+                    statusMsg.innerHTML = '<strong>RCA 분석 시작</strong> — 근본 원인 분석이 진행 중입니다. 잠시 후 페이지를 새로고침하세요.';
                     setTimeout(() => location.reload(), 5000);
+                } else if (data.status === 'manual_action') {
+                    statusMsg.classList.add('status-info');
+                    statusMsg.innerHTML = '<strong>수동조치예정</strong> — 담당자가 수동으로 조치할 예정입니다.';
+                } else if (data.status === 'expired') {
+                    statusMsg.classList.add('status-error');
+                    statusMsg.innerHTML = '<strong>만료됨</strong> — 승인 시간이 초과되었습니다.';
+                } else if (data.error) {
+                    statusMsg.classList.add('status-error');
+                    statusMsg.innerHTML = data.error;
                 } else {
                     statusMsg.classList.add('status-error');
-                    statusMsg.textContent = '⚠️ ' + (data.error || '처리 중 오류가 발생했습니다.');
+                    statusMsg.innerHTML = '처리 중 오류가 발생했습니다.';
                 }
             } catch (err) {
                 statusMsg.className = 'status-msg status-error';
-                statusMsg.textContent = '⚠️ 네트워크 오류: ' + err.message;
-                btns.forEach(b => b.disabled = false);
+                statusMsg.innerHTML = '네트워크 오류: ' + err.message;
+                buttons.forEach(b => b.disabled = false);
             }
         }
     </script>

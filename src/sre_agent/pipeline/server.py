@@ -105,7 +105,7 @@ def create_pipeline_app(settings: Settings):
 
         result: AnalysisResult = analyzer.analyze_phase_a(req)
 
-        has_runbook = "MATCH_FOUND" in result.report
+        has_runbook = result.runbook_match.get("matched", False)
         report_sent_at = time.time()
 
         with _lock:
@@ -116,6 +116,7 @@ def create_pipeline_app(settings: Settings):
                 "elapsed_seconds": result.elapsed_seconds,
                 "analysis_level": result.analysis_level.value,
                 "has_action": has_runbook,
+                "runbook_match": result.runbook_match,  # Structured match data
                 "error": result.error,
                 "report_sent_at": report_sent_at,
             })

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from sre_agent.config import Settings
 from sre_agent.pipeline.intake import AnalysisLevel, IncidentRequest
@@ -23,6 +24,7 @@ class AnalysisResult:
     status: str = "completed"  # completed | failed | skipped
     error: str = ""
     collected_data: str = ""  # Raw data collection output for Phase B reuse
+    runbook_match: dict[str, Any] = field(default_factory=dict)  # Structured match data from report_match tool
 
 
 class PipelineAnalyzer:
@@ -33,6 +35,7 @@ class PipelineAnalyzer:
         self._settings = settings
         self._phase_a = None
         self._phase_b = None
+        self._match_result: dict[str, Any] = {}  # Side-channel for runbook match data
         from sre_agent.callbacks import LoggingProgressTracker
         self._tracker = LoggingProgressTracker(logger)
 
@@ -40,7 +43,7 @@ class PipelineAnalyzer:
         """Lazy-init Phase A orchestrator (data collector + runbook matcher)."""
         if self._phase_a is None:
             from sre_agent.agents.phase_a_orchestrator import create_phase_a_orchestrator
-            self._phase_a = create_phase_a_orchestrator(
+            self._phase_a, self._match_result = create_phase_a_orchestrator(
                 self._settings,
                 callback_handler=self._tracker.get_orchestrator_handler(),
                 tool_callback_handler=self._tracker.get_tool_handler(),
@@ -98,13 +101,25 @@ class PipelineAnalyzer:
         elapsed = time.time() - start
         report = str(result)
 
-        logger.info("Phase A completed for %s in %.1fs", request.incident_id, elapsed)
+        # Read structured runbook match data from the side-channel
+        # (populated by the report_match tool inside runbook_matcher_agent).
+        runbook_match = dict(self._match_result)  # snapshot
+        # Reset for next invocation (the container is reused across calls).
+        self._match_result.update(
+            {"matched": False, "name": "", "risk": "", "script": "", "target_host_label": ""}
+        )
+        logger.info(
+            "Phase A completed for %s in %.1fs (runbook_matched=%s)",
+            request.incident_id, elapsed, runbook_match.get("matched", False),
+        )
+
         return AnalysisResult(
             incident_id=request.incident_id,
             report=report,
             analysis_level=request.analysis_level,
             elapsed_seconds=elapsed,
             collected_data=report,  # Preserve for Phase B
+            runbook_match=runbook_match,
         )
 
     # -- Phase B: on-demand RCA + solution ------------------------------------

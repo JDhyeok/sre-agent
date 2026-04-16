@@ -54,6 +54,10 @@ SYSTEM_PROMPT_TEMPLATE = """당신은 SRE 인시던트 대응 오케스트레이
 
 ### Phase 1 — 데이터 수집
 인시던트 컨텍스트를 **data_collector_agent**에 전달.
+**중요**: 인시던트 컨텍스트에 "Prometheus Label Hints" 섹션이 있다면,
+해당 라벨을 data_collector_agent에 **반드시 함께 전달**하세요.
+이 라벨은 Alertmanager alert rule에서 추출된 것으로, Prometheus 쿼리 시
+정확한 셀렉터로 사용해야 합니다 (예: `container_label_*` 라벨).
 
 ### Phase 2 — 근본 원인 분석
 수집된 데이터 전체를 **rca_agent**에 전달.

@@ -88,7 +88,39 @@ class IncidentRequest:
             if alert.annotations.get("description"):
                 lines.append(f"  Description: {alert.annotations['description']}")
             lines.append("")
+
+        # Prometheus 쿼리용 라벨 힌트: alert labels에서 메트릭 조회에 유용한
+        # 라벨을 추출해 data_collector가 첫 쿼리부터 올바른 셀렉터를 사용하도록 함.
+        label_hints = self._build_label_hints()
+        if label_hints:
+            lines.append("--- Prometheus Label Hints ---")
+            lines.append("아래 라벨은 alert rule에서 추출되었습니다.")
+            lines.append("Prometheus 쿼리 시 이 라벨을 셀렉터로 사용하세요.")
+            lines.append("(Docker 환경: name=<컨테이너명>, container_label_*=<Docker라벨>)")
+            lines.append("(Kubernetes 환경: container=<이름>, pod=<이름>, namespace=<이름>)")
+            for key, value in label_hints.items():
+                lines.append(f"  {key}={json.dumps(value)}")
+            lines.append("")
+
         return "\n".join(lines)
+
+    def _build_label_hints(self) -> dict[str, str]:
+        """Extract Prometheus-useful labels from alerts for query targeting."""
+        hints: dict[str, str] = {}
+        # 유용한 라벨 키 우선순위 (앞이 높음)
+        useful_keys = [
+            "container", "pod", "namespace", "instance", "job",
+            "service", "node", "deployment", "statefulset",
+        ]
+        for alert in self.alerts:
+            for key in useful_keys:
+                if key not in hints and key in alert.labels:
+                    hints[key] = alert.labels[key]
+            # container_label_* 같은 cAdvisor용 라벨도 포함
+            for key, value in alert.labels.items():
+                if key.startswith("container_label_") and key not in hints:
+                    hints[key] = value
+        return hints
 
 
 # ---------------------------------------------------------------------------
