@@ -27,22 +27,27 @@ _RUNBOOK_DIR = Path(__file__).resolve().parent.parent / "runbooks"
 _APPROVAL_TIMEOUT_MINUTES = 10
 
 
-def _extract_metrics_json(report: str) -> str:
-    """Extract metrics_json code block from the report for chart rendering.
+def _extract_visualization_json(report: str) -> str:
+    """Extract visualization_json code block from the report for chart/table rendering.
 
-    Returns the raw JSON string, or empty string if not found.
+    Accepts both ``visualization_json`` (new) and ``metrics_json`` (legacy) blocks.
+    Returns the raw JSON string, or empty string if not found/invalid.
     """
-    match = re.search(r"```metrics_json\s*\n(.*?)```", report, re.DOTALL)
-    if not match:
-        return ""
-    raw = match.group(1).strip()
-    # Validate it's parseable JSON
-    try:
-        import json
-        json.loads(raw)
-        return raw
-    except (json.JSONDecodeError, ValueError):
-        return ""
+    import json as _json
+
+    for tag in ("visualization_json", "metrics_json"):
+        match = re.search(rf"```{tag}\s*\n(.*?)```", report, re.DOTALL)
+        if match:
+            raw = match.group(1).strip()
+            try:
+                parsed = _json.loads(raw)
+                # Normalize legacy format (array) to new format (dict with charts key)
+                if isinstance(parsed, list):
+                    return _json.dumps({"charts": parsed})
+                return raw
+            except (_json.JSONDecodeError, ValueError):
+                continue
+    return ""
 
 
 def register_approval_routes(
@@ -132,8 +137,8 @@ def register_approval_routes(
             except Exception:
                 rca_report_html = _strip_markdown_markers(rca_report_md)
 
-        # Extract chart data from report
-        metrics_json = _extract_metrics_json(report_md)
+        # Extract visualization data from report
+        metrics_json = _extract_visualization_json(report_md)
 
         template = _jinja_env.get_template("approval.html")
         html = template.render(

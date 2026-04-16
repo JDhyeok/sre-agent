@@ -317,10 +317,7 @@
         {% endif %}
 
         {% if metrics_json %}
-        <div class="section">
-            <h2>메트릭 시각화</h2>
-            <div id="chartsContainer"></div>
-        </div>
+        <div id="vizRoot"></div>
         {% endif %}
 
         <div class="section">
@@ -381,100 +378,206 @@
     </div>
 
     {% if metrics_json %}
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script>
-        (function() {
-            try {
-                const metricsData = {{ metrics_json|safe }};
-                const container = document.getElementById('chartsContainer');
-                if (!metricsData || !metricsData.length) return;
+    /* ── Inline visualization renderer (no external CDN) ── */
+    (function(){
+    try {
+        const V = {{ metrics_json|safe }};
+        const root = document.getElementById('vizRoot');
+        if(!root) return;
+        const C = ['#3b82f6','#22c55e','#f59e0b'];
 
-                const colors = ['#3b82f6', '#22c55e', '#f59e0b'];
+        /* ── Helper: draw a line chart on canvas ── */
+        function drawChart(canvas, points, color, unit){
+            const ctx = canvas.getContext('2d');
+            const W = canvas.width = canvas.parentElement.clientWidth;
+            const H = canvas.height = 180;
+            const pad = {t:20,r:20,b:30,l:55};
+            const cw = W-pad.l-pad.r, ch = H-pad.t-pad.b;
+            const vals = points.map(p=>p.v);
+            let yMin = Math.min(...vals), yMax = Math.max(...vals);
+            if(yMin===yMax){yMin-=1;yMax+=1;}
+            const yRange = yMax-yMin;
+            const tMin = new Date(points[0].t).getTime();
+            const tMax = new Date(points[points.length-1].t).getTime();
+            const tRange = tMax-tMin||1;
 
-                metricsData.forEach(function(metric, idx) {
-                    if (!metric.data || !metric.data.length) return;
+            function x(t){return pad.l+(new Date(t).getTime()-tMin)/tRange*cw;}
+            function y(v){return pad.t+ch-(v-yMin)/yRange*ch;}
 
-                    const wrapper = document.createElement('div');
-                    wrapper.style.marginBottom = '1.5rem';
-
-                    const label = document.createElement('div');
-                    label.style.cssText = 'color: #a1a1aa; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.5rem;';
-                    label.textContent = metric.label;
-                    wrapper.appendChild(label);
-
-                    const canvasWrapper = document.createElement('div');
-                    canvasWrapper.style.cssText = 'background: #09090b; border: 1px solid #27272a; border-radius: 6px; padding: 1rem;';
-                    const canvas = document.createElement('canvas');
-                    canvas.height = 200;
-                    canvasWrapper.appendChild(canvas);
-                    wrapper.appendChild(canvasWrapper);
-
-                    // Stats row
-                    const values = metric.data.map(d => d.v);
-                    const min = Math.min(...values);
-                    const max = Math.max(...values);
-                    const avg = values.reduce((a, b) => a + b, 0) / values.length;
-                    const latest = values[values.length - 1];
-
-                    const stats = document.createElement('div');
-                    stats.style.cssText = 'display: flex; gap: 1.5rem; margin-top: 0.5rem; font-size: 0.8rem; color: #a1a1aa;';
-                    stats.innerHTML =
-                        '<span>현재: <strong style="color:#fafafa">' + latest.toFixed(1) + '</strong></span>' +
-                        '<span>평균: <strong style="color:#fafafa">' + avg.toFixed(1) + '</strong></span>' +
-                        '<span>최소: <strong style="color:#22c55e">' + min.toFixed(1) + '</strong></span>' +
-                        '<span>최대: <strong style="color:#ef4444">' + max.toFixed(1) + '</strong></span>';
-                    wrapper.appendChild(stats);
-
-                    container.appendChild(wrapper);
-
-                    const color = colors[idx % colors.length];
-                    new Chart(canvas, {
-                        type: 'line',
-                        data: {
-                            datasets: [{
-                                label: metric.label,
-                                data: metric.data.map(d => ({ x: new Date(d.t), y: d.v })),
-                                borderColor: color,
-                                backgroundColor: color + '20',
-                                fill: true,
-                                tension: 0.3,
-                                pointRadius: 0,
-                                borderWidth: 2,
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {
-                                legend: { display: false },
-                                tooltip: {
-                                    backgroundColor: '#18181b',
-                                    titleColor: '#fafafa',
-                                    bodyColor: '#d4d4d8',
-                                    borderColor: '#27272a',
-                                    borderWidth: 1,
-                                }
-                            },
-                            scales: {
-                                x: {
-                                    type: 'time',
-                                    time: { tooltipFormat: 'HH:mm:ss' },
-                                    grid: { color: '#27272a' },
-                                    ticks: { color: '#71717a', maxTicksLimit: 8 },
-                                },
-                                y: {
-                                    grid: { color: '#27272a' },
-                                    ticks: { color: '#71717a' },
-                                }
-                            }
-                        }
-                    });
-                });
-            } catch(e) {
-                console.error('Chart rendering error:', e);
+            // Background
+            ctx.fillStyle='#09090b'; ctx.fillRect(0,0,W,H);
+            // Grid
+            ctx.strokeStyle='#27272a'; ctx.lineWidth=1;
+            for(let i=0;i<=4;i++){
+                const gy=pad.t+ch/4*i;
+                ctx.beginPath();ctx.moveTo(pad.l,gy);ctx.lineTo(W-pad.r,gy);ctx.stroke();
+                ctx.fillStyle='#71717a';ctx.font='11px sans-serif';ctx.textAlign='right';
+                ctx.fillText((yMax-yRange/4*i).toFixed(1)+(unit||''),pad.l-6,gy+4);
             }
-        })();
+            // Time labels
+            const tSteps=Math.min(points.length,6);
+            ctx.fillStyle='#71717a';ctx.font='10px sans-serif';ctx.textAlign='center';
+            for(let i=0;i<tSteps;i++){
+                const idx=Math.floor(i/(tSteps-1)*(points.length-1));
+                const d=new Date(points[idx].t);
+                ctx.fillText(d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0'),x(points[idx].t),H-4);
+            }
+            // Fill
+            ctx.beginPath();ctx.moveTo(x(points[0].t),y(points[0].v));
+            points.forEach(p=>ctx.lineTo(x(p.t),y(p.v)));
+            ctx.lineTo(x(points[points.length-1].t),pad.t+ch);
+            ctx.lineTo(x(points[0].t),pad.t+ch);ctx.closePath();
+            ctx.fillStyle=color+'18';ctx.fill();
+            // Line
+            ctx.beginPath();ctx.moveTo(x(points[0].t),y(points[0].v));
+            points.forEach(p=>ctx.lineTo(x(p.t),y(p.v)));
+            ctx.strokeStyle=color;ctx.lineWidth=2;ctx.stroke();
+        }
+
+        function section(title,icon){
+            const s=document.createElement('div');
+            s.className='section';
+            s.innerHTML='<h2>'+icon+' '+title+'</h2>';
+            root.appendChild(s);
+            return s;
+        }
+        function statsRow(vals,unit){
+            const min=Math.min(...vals),max=Math.max(...vals);
+            const avg=vals.reduce((a,b)=>a+b,0)/vals.length;
+            const cur=vals[vals.length-1];
+            const u=unit||'';
+            return '<div style="display:flex;gap:1.5rem;margin-top:0.5rem;font-size:0.8rem;color:#a1a1aa;">'+
+                '<span>현재: <strong style="color:#fafafa">'+cur.toFixed(1)+u+'</strong></span>'+
+                '<span>평균: <strong style="color:#fafafa">'+avg.toFixed(1)+u+'</strong></span>'+
+                '<span>최소: <strong style="color:#22c55e">'+min.toFixed(1)+u+'</strong></span>'+
+                '<span>최대: <strong style="color:#ef4444">'+max.toFixed(1)+u+'</strong></span></div>';
+        }
+
+        /* ── 1. Charts (time-series) ── */
+        if(V.charts && V.charts.length){
+            const s=section('메트릭 추이','📈');
+            V.charts.forEach(function(m,i){
+                if(!m.data||!m.data.length)return;
+                const lbl=document.createElement('div');
+                lbl.style.cssText='color:#a1a1aa;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;margin:1rem 0 0.4rem;';
+                lbl.textContent=m.label;s.appendChild(lbl);
+                const cw=document.createElement('div');
+                cw.style.cssText='border:1px solid #27272a;border-radius:6px;overflow:hidden;';
+                const cv=document.createElement('canvas');cw.appendChild(cv);s.appendChild(cw);
+                drawChart(cv,m.data,C[i%3],m.unit||'');
+                const st=document.createElement('div');
+                st.innerHTML=statsRow(m.data.map(d=>d.v),m.unit||'');s.appendChild(st);
+            });
+        }
+
+        /* ── 2. Process table ── */
+        if(V.processes && V.processes.length){
+            const s=section('프로세스 현황 (상위 리소스 소비)','⚙️');
+            let h='<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:0.85rem;margin-top:0.5rem;">'+
+                '<thead><tr style="background:#18181b;"><th style="padding:0.5rem;border:1px solid #27272a;text-align:left;">PID</th>'+
+                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:left;">프로세스</th>'+
+                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:right;">CPU %</th>'+
+                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:right;">MEM %</th>'+
+                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:left;">커맨드</th></tr></thead><tbody>';
+            V.processes.forEach(function(p){
+                const cpuColor=p.cpu>80?'#ef4444':p.cpu>50?'#f59e0b':'#e4e4e7';
+                const memColor=p.mem>80?'#ef4444':p.mem>50?'#f59e0b':'#e4e4e7';
+                h+='<tr><td style="padding:0.4rem 0.5rem;border:1px solid #27272a;">'+p.pid+'</td>'+
+                    '<td style="padding:0.4rem 0.5rem;border:1px solid #27272a;font-weight:600;">'+p.name+'</td>'+
+                    '<td style="padding:0.4rem 0.5rem;border:1px solid #27272a;text-align:right;color:'+cpuColor+';">'+p.cpu.toFixed(1)+'</td>'+
+                    '<td style="padding:0.4rem 0.5rem;border:1px solid #27272a;text-align:right;color:'+memColor+';">'+p.mem.toFixed(1)+'</td>'+
+                    '<td style="padding:0.4rem 0.5rem;border:1px solid #27272a;color:#a1a1aa;font-size:0.8rem;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+
+                    (p.command||'')+'</td></tr>';
+            });
+            h+='</tbody></table></div>';
+            s.insertAdjacentHTML('beforeend',h);
+        }
+
+        /* ── 3. Network status ── */
+        if(V.network){
+            const s=section('네트워크 상태','🌐');
+            if(V.network.summary){
+                let h='<div style="display:flex;flex-wrap:wrap;gap:0.75rem;margin-top:0.5rem;">';
+                Object.entries(V.network.summary).forEach(function(e){
+                    const st=e[0],cnt=e[1];
+                    const warn=(st==='CLOSE_WAIT'||st==='TIME_WAIT')&&cnt>20;
+                    const bg=warn?'#451a03':'#18181b';
+                    const bc=warn?'#f59e0b':'#27272a';
+                    h+='<div style="background:'+bg+';border:1px solid '+bc+';border-radius:6px;padding:0.6rem 1rem;min-width:100px;">'+
+                        '<div style="font-size:0.7rem;color:#71717a;text-transform:uppercase;">'+st+'</div>'+
+                        '<div style="font-size:1.3rem;font-weight:700;color:'+(warn?'#f59e0b':'#fafafa')+';">'+cnt+'</div></div>';
+                });
+                h+='</div>';s.insertAdjacentHTML('beforeend',h);
+            }
+            if(V.network.stale && V.network.stale.length){
+                let h='<div style="margin-top:1rem;"><div style="color:#f59e0b;font-size:0.8rem;font-weight:600;margin-bottom:0.4rem;">⚠ 비정상 연결</div>'+
+                    '<table style="width:100%;border-collapse:collapse;font-size:0.8rem;">'+
+                    '<thead><tr style="background:#451a03;"><th style="padding:0.4rem;border:1px solid #27272a;text-align:left;">로컬</th>'+
+                    '<th style="padding:0.4rem;border:1px solid #27272a;text-align:left;">원격</th>'+
+                    '<th style="padding:0.4rem;border:1px solid #27272a;">상태</th>'+
+                    '<th style="padding:0.4rem;border:1px solid #27272a;">비고</th></tr></thead><tbody>';
+                V.network.stale.forEach(function(c){
+                    h+='<tr><td style="padding:0.3rem 0.4rem;border:1px solid #27272a;">'+c.local+'</td>'+
+                        '<td style="padding:0.3rem 0.4rem;border:1px solid #27272a;">'+c.remote+'</td>'+
+                        '<td style="padding:0.3rem 0.4rem;border:1px solid #27272a;color:#f59e0b;text-align:center;">'+c.state+'</td>'+
+                        '<td style="padding:0.3rem 0.4rem;border:1px solid #27272a;color:#a1a1aa;">'+(c.info||'')+'</td></tr>';
+                });
+                h+='</tbody></table></div>';s.insertAdjacentHTML('beforeend',h);
+            }
+        }
+
+        /* ── 4. Log summary ── */
+        if(V.logs){
+            const s=section('로그 요약','📋');
+            if(V.logs.total_errors!==undefined){
+                const ec=V.logs.total_errors;
+                const bg=ec>100?'#450a0a':ec>10?'#451a03':'#052e16';
+                const bc=ec>100?'#ef4444':ec>10?'#f59e0b':'#22c55e';
+                const fc=ec>100?'#ef4444':ec>10?'#f59e0b':'#22c55e';
+                s.insertAdjacentHTML('beforeend',
+                    '<div style="display:inline-block;background:'+bg+';border:1px solid '+bc+';border-radius:6px;padding:0.6rem 1.2rem;margin-top:0.5rem;">'+
+                    '<span style="font-size:0.7rem;color:#71717a;">총 에러 수</span>'+
+                    '<div style="font-size:1.5rem;font-weight:700;color:'+fc+';">'+ec+'</div></div>');
+            }
+            if(V.logs.patterns && V.logs.patterns.length){
+                let h='<div style="margin-top:1rem;">';
+                V.logs.patterns.forEach(function(p){
+                    const lc=p.level==='error'?'#ef4444':p.level==='warn'?'#f59e0b':'#3b82f6';
+                    h+='<div style="background:#09090b;border:1px solid #27272a;border-left:3px solid '+lc+';border-radius:4px;padding:0.6rem 1rem;margin-bottom:0.5rem;">'+
+                        '<div style="display:flex;justify-content:space-between;align-items:center;">'+
+                        '<span style="color:#e4e4e7;font-size:0.85rem;">'+p.pattern+'</span>'+
+                        '<span style="background:'+lc+'22;color:'+lc+';padding:0.15rem 0.5rem;border-radius:10px;font-size:0.75rem;font-weight:600;">'+p.count+'건</span>'+
+                        '</div></div>';
+                });
+                h+='</div>';s.insertAdjacentHTML('beforeend',h);
+            }
+        }
+
+        /* ── 5. APM metrics ── */
+        if(V.apm && V.apm.services && V.apm.services.length){
+            const s=section('APM 서비스 현황','📊');
+            let h='<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:0.85rem;margin-top:0.5rem;">'+
+                '<thead><tr style="background:#18181b;">'+
+                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:left;">서비스</th>'+
+                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:right;">평균 응답(ms)</th>'+
+                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:right;">P99(ms)</th>'+
+                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:right;">에러율(%)</th>'+
+                '<th style="padding:0.5rem;border:1px solid #27272a;text-align:right;">TPS</th>'+
+                '</tr></thead><tbody>';
+            V.apm.services.forEach(function(sv){
+                const avgC=sv.avg_ms>1000?'#ef4444':sv.avg_ms>500?'#f59e0b':'#e4e4e7';
+                const errC=sv.error_rate>5?'#ef4444':sv.error_rate>1?'#f59e0b':'#22c55e';
+                h+='<tr><td style="padding:0.4rem 0.5rem;border:1px solid #27272a;font-weight:600;">'+sv.name+'</td>'+
+                    '<td style="padding:0.4rem 0.5rem;border:1px solid #27272a;text-align:right;color:'+avgC+';">'+sv.avg_ms+'</td>'+
+                    '<td style="padding:0.4rem 0.5rem;border:1px solid #27272a;text-align:right;">'+sv.p99_ms+'</td>'+
+                    '<td style="padding:0.4rem 0.5rem;border:1px solid #27272a;text-align:right;color:'+errC+';">'+sv.error_rate.toFixed(1)+'</td>'+
+                    '<td style="padding:0.4rem 0.5rem;border:1px solid #27272a;text-align:right;">'+sv.tps+'</td></tr>';
+            });
+            h+='</tbody></table></div>';s.insertAdjacentHTML('beforeend',h);
+        }
+    } catch(e){ console.error('Visualization error:',e); }
+    })();
     </script>
     {% endif %}
 

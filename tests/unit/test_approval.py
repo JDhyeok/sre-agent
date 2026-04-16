@@ -3,7 +3,7 @@
 import pytest
 
 from sre_agent.pipeline.approval import (
-    _extract_metrics_json,
+    _extract_visualization_json,
     _extract_runbook_name,
     _extract_section,
     _extract_what,
@@ -129,34 +129,37 @@ class TestParseNoMatch:
 # _extract_metrics_json
 # ---------------------------------------------------------------------------
 
-class TestExtractMetricsJson:
-    def test_valid_metrics_block(self):
-        report = '### 시각화 데이터\n```metrics_json\n[{"label": "CPU", "data": [{"t": "2026-04-16T03:00:00Z", "v": 55.2}]}]\n```\n'
-        result = _extract_metrics_json(report)
+class TestExtractVisualizationJson:
+    def test_new_format_visualization_json(self):
+        report = '```visualization_json\n{"charts": [{"label": "CPU", "data": [{"t": "2026-04-16T03:00:00Z", "v": 55.2}]}]}\n```\n'
+        result = _extract_visualization_json(report)
         assert '"CPU"' in result
         assert "55.2" in result
 
-    def test_no_metrics_block(self):
+    def test_legacy_metrics_json_normalized(self):
+        report = '```metrics_json\n[{"label": "Memory", "data": [{"t": "2026-04-16T03:00:00Z", "v": 80.5}]}]\n```\n'
+        result = _extract_visualization_json(report)
+        # Legacy array format should be wrapped in {"charts": [...]}
+        import json
+        parsed = json.loads(result)
+        assert "charts" in parsed
+        assert parsed["charts"][0]["label"] == "Memory"
+
+    def test_no_block(self):
         report = "Just a regular report without charts."
-        result = _extract_metrics_json(report)
-        assert result == ""
+        assert _extract_visualization_json(report) == ""
 
     def test_invalid_json_returns_empty(self):
-        report = '```metrics_json\n{not valid json}\n```'
-        result = _extract_metrics_json(report)
-        assert result == ""
+        report = '```visualization_json\n{not valid}\n```'
+        assert _extract_visualization_json(report) == ""
 
-    def test_multiline_json(self):
-        report = '```metrics_json\n[\n  {\n    "label": "Memory",\n    "data": [\n      {"t": "2026-04-16T03:00:00Z", "v": 80.5},\n      {"t": "2026-04-16T03:05:00Z", "v": 85.1}\n    ]\n  }\n]\n```'
-        result = _extract_metrics_json(report)
-        assert '"Memory"' in result
-        assert "80.5" in result
-        assert "85.1" in result
-
-    def test_empty_array(self):
-        report = '```metrics_json\n[]\n```'
-        result = _extract_metrics_json(report)
-        assert result == "[]"
+    def test_full_visualization_data(self):
+        report = '```visualization_json\n{"charts": [], "processes": [{"pid": 1, "name": "java", "cpu": 45.0, "mem": 30.0, "command": "java"}], "logs": {"total_errors": 10, "patterns": []}}\n```'
+        result = _extract_visualization_json(report)
+        import json
+        parsed = json.loads(result)
+        assert parsed["processes"][0]["name"] == "java"
+        assert parsed["logs"]["total_errors"] == 10
 
 
 # ---------------------------------------------------------------------------
