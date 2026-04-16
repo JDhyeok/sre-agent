@@ -56,23 +56,27 @@ def create_orchestrator(
             name="data_collector_agent",
             description=(
                 "Unified observability data investigator with access to Prometheus "
-                "(metrics, alerts), Elasticsearch (logs), and ServiceNow CMDB "
-                "(topology, dependencies). Performs top-down layer-by-layer "
+                "(metrics, alerts), Elasticsearch (logs), ServiceNow CMDB "
+                "(topology, dependencies), and SSH diagnostics (process list, "
+                "network connections, memory/disk/CPU status — hardcoded "
+                "read-only commands). Performs top-down layer-by-layer "
                 "investigation: L1 symptom → L2 service → L3 application → "
                 "L4 dependency → L5 infrastructure → L6 platform. "
                 "Pass the full incident context and it autonomously decides "
-                "which data sources and layers to investigate."
+                "which data sources and layers to investigate. "
+                "This agent handles ALL data collection including live server "
+                "diagnostics — do NOT use ssh_agent for information gathering."
             ),
         ),
         ssh_agent.as_tool(
             name="ssh_agent",
             description=(
-                "Executes read-only diagnostic commands on target servers via SSH. "
-                "Use for L5/L6 deep-dive: process inspection (ps, top), network "
-                "state (ss, netstat), disk/memory checks (df, free), and service "
-                "status (systemctl). Only call when data_collector_agent findings "
-                "suggest a need for live server diagnostics. "
-                "Pass the incident context and specify which hosts to check."
+                "Executes operational commands on target servers via SSH. "
+                "Use ONLY for remediation actions such as service restarts, "
+                "configuration reloads, or other state-changing operations. "
+                "Do NOT use for diagnostic data collection (ps, netstat, df, "
+                "free, etc.) — data_collector_agent handles that. "
+                "Only call when a concrete operational action is needed."
             ),
         ),
         rca_agent.as_tool(

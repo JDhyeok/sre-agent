@@ -89,6 +89,7 @@ query_instant("node_memory_MemAvailable_bytes")
 ### ServiceNow CMDB (토폴로지 & 구성)
 도구: get_ci_details, search_ci, get_service_dependencies, get_ci_relationships
 용도: 서비스-서버 매핑, 상위/하위 의존성, CI 운영 상태, 환경 컨텍스트.
+{ssh_diagnostic_section}
 
 ## Top-Down 조사 프레임워크
 
@@ -133,6 +134,10 @@ batch_query([
   * CPU: 100 - (avg by(instance)(rate(node_cpu_seconds_total{{mode="idle"}}[5m])) * 100)
   * Memory: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100
   * Disk: (1 - node_filesystem_avail_bytes / node_filesystem_size_bytes) * 100
+- SSH 진단 호스트가 구성되어 있다면:
+  * get_memory_info / get_disk_usage → 실시간 호스트 리소스 확인
+  * get_top_cpu_processes / get_top_memory_processes → 리소스를 많이 소모하는 프로세스
+  * get_network_connections → 비정상 커넥션, 커넥션 폭주 확인
 
 ### L6 — 플랫폼 레이어 (Kubernetes / 클라우드 / DNS)
 목표: L1~L5로 결론이 안 날 때 플랫폼 수준 확인.
@@ -175,6 +180,23 @@ batch_query([
 """
 
 
-def build_system_prompt(max_tool_calls: int = 6) -> str:
+_SSH_DIAGNOSTIC_SECTION = """
+### SSH 진단 (실시간 시스템 정보)
+도구: list_diagnostic_hosts, get_processes, get_top_cpu_processes,
+      get_top_memory_processes, get_network_connections, get_listening_ports,
+      get_network_stats, get_memory_info, get_disk_usage, get_disk_inodes,
+      get_system_load, get_vmstat, get_cpu_info, get_dmesg, get_os_info,
+      get_service_status, get_service_logs
+용도: 프로세스 목록, CPU/메모리 상위 프로세스, 네트워크 커넥션, 리스닝 포트,
+      디스크/메모리 상태, 시스템 로드, 서비스 상태/로그, 커널 메시지.
+주의: 모든 명령은 하드코딩되어 있어 실행할 명령을 선택할 수 없습니다.
+      호스트 이름만 지정하면 됩니다. **읽기 전용 진단만 가능합니다.**"""
+
+
+def build_system_prompt(max_tool_calls: int = 6, *, ssh_enabled: bool = False) -> str:
     """Build the data collector system prompt with the tool call budget injected."""
-    return SYSTEM_PROMPT_TEMPLATE.format(max_tool_calls=max_tool_calls)
+    ssh_section = _SSH_DIAGNOSTIC_SECTION if ssh_enabled else ""
+    return SYSTEM_PROMPT_TEMPLATE.format(
+        max_tool_calls=max_tool_calls,
+        ssh_diagnostic_section=ssh_section,
+    )
