@@ -1,192 +1,115 @@
-# CLAUDE.md - SRE Multi-Agent System
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-SRE Multi-Agent System for automated Root Cause Analysis (RCA). Uses the **Strands Agents SDK** with an "Agents as Tools" pattern to coordinate specialist AI agents that collect observability data, perform root cause analysis, and suggest/execute remediation via runbooks.
+SRE Multi-Agent System for automated Root Cause Analysis. Built on the **Strands Agents SDK** using the "Agents as Tools" pattern — specialist agents are registered as callable tools on a parent orchestrator via `.as_tool()`.
 
-**Two operating modes:**
-- **Interactive CLI** (`sre-agent`) - Real-time incident investigation
-- **Automated Pipeline** (`sre-agent serve`) - Webhook-driven incident response with approval workflow
+Two operating modes share the same agent graph:
+- **Interactive CLI** (`sre-agent`) — Typer + Rich terminal UI for manual incident investigation.
+- **Automated Pipeline** (`sre-agent serve`) — FastAPI webhook receiver with a 2-phase split (A: always-on data collection + runbook match; B: on-demand RCA + solution after human approval).
 
-## Quick Reference
-
-| Action | Command |
-|--------|---------|
-| Install (basic) | `pip install .` |
-| Install (all extras) | `pip install ".[all]"` |
-| Install (dev) | `pip install -e ".[all,dev]"` or `make install-dev` |
-| Run CLI | `sre-agent` |
-| Run pipeline server | `sre-agent serve` |
-| Run tests | `pytest tests/` |
-| Lint (check only) | `make lint` |
-| Format (auto-fix) | `make format` |
-| Build package | `make build` |
-| Clean artifacts | `make clean` |
-| Start test stack | `docker compose -f docker-compose.test.yaml up -d` |
-
-## Tech Stack
-
-- **Python 3.11+** (supports 3.11, 3.12, 3.13)
-- **Strands Agents SDK** (`strands-agents[anthropic]`) - Multi-agent orchestration
-- **FastMCP** - MCP tool servers (stdio subprocess transport)
-- **Typer + Rich** - CLI framework and terminal rendering
-- **FastAPI** - Pipeline webhook server (optional `webhook` extra)
-- **Paramiko** - SSH operations (optional `ssh` extra)
-- **Pydantic v2 + pydantic-settings** - Configuration and validation
-- **Hatchling** - Build system
-- **Ruff** - Linter and formatter
-- **pytest + pytest-asyncio** - Test framework
-
-## Repository Structure
-
-```
-src/sre_agent/
-├── cli.py                  # Entry point: interactive CLI + serve command
-├── config.py               # Pydantic settings, YAML loading, env var overlays
-├── model.py                # LLM model setup (Anthropic)
-├── callbacks.py            # Progress display (Rich for CLI, logging for pipeline)
-├── agents/                 # Specialist agents (Strands Agent instances)
-│   ├── orchestrator.py     # Master orchestrator, creates all sub-agents
-│   ├── phase_a_orchestrator.py  # Phase A: data collection + runbook matching
-│   ├── phase_b_orchestrator.py  # Phase B: full analysis + approval handling
-│   ├── data_collector.py   # Unified metrics/logs/topology collection
-│   ├── ssh.py              # SSH diagnostics agent
-│   ├── rca.py              # Root cause analysis (5-phase framework)
-│   ├── solution.py         # Remediation recommendation
-│   └── operator.py         # Runbook matching
-├── mcp_servers/            # FastMCP tool servers (each runs as stdio subprocess)
-│   ├── prometheus_server.py      # Prometheus metrics + alerts
-│   ├── elasticsearch_server.py   # Log search
-│   ├── apm_server.py             # APM integration
-│   ├── servicenow_cmdb_server.py # CMDB topology
-│   ├── ssh_diagnostic_server.py  # Read-only SSH diagnostics
-│   └── ssh_server.py             # SSH command execution
-├── prompts/                # System prompt modules (one per agent)
-├── pipeline/               # Automated pipeline (FastAPI)
-│   ├── server.py           # FastAPI app with webhook + incident endpoints
-│   ├── intake.py           # Alert dedup + severity routing
-│   ├── analyzer.py         # Phase orchestration (A → B)
-│   ├── delivery.py         # Teams webhook notifications
-│   └── approval.py         # Web UI + SSH execution for runbooks
-├── tools/                  # In-process Strands tools
-│   └── runbook.py          # Runbook listing and matching
-├── runbooks/               # Markdown runbooks (only _template.md tracked)
-├── templates/              # Jinja2 HTML templates (approval.html)
-└── defaults/               # Bundled config defaults (shipped in wheel)
-    ├── settings.yaml
-    └── ssh_allowlist.yaml
-
-tests/
-├── conftest.py             # Shared fixtures (alert payloads, runbook samples)
-└── unit/
-    ├── test_config.py      # Configuration loading
-    ├── test_callbacks.py   # Progress tracking
-    ├── test_intake.py      # Alert deduplication
-    ├── test_analyzer.py    # Pipeline analysis
-    ├── test_approval.py    # Approval workflow
-    ├── test_runbook.py     # Runbook matching
-    └── mcp_servers/        # MCP server unit tests
-
-configs/                    # Development configuration
-├── settings.yaml           # Dev settings (data source URLs, SSH hosts, etc.)
-├── ssh_allowlist.yaml      # SSH command whitelist
-└── memory-leak-daemon.py   # Test workload for E2E stack
-```
-
-## Architecture
-
-### Agent Hierarchy
-
-The system uses "Agents as Tools" - each specialist agent is registered as a callable tool on its parent orchestrator:
-
-```
-Orchestrator (master)
-├── Data Collector Agent → Prometheus, Elasticsearch, ServiceNow CMDB (via MCP)
-├── SSH Agent → Target servers (via MCP, read-only)
-├── RCA Agent → 5-phase root cause analysis (reasoning only, no tools)
-├── Solution Agent → Remediation recommendations (reasoning only, no tools)
-└── Runbook Matcher Agent → list_runbooks, get_runbook tools
-```
-
-### Pipeline Flow (Automated Mode)
-
-```
-Webhook → Intake (dedup/routing) → Phase A (data collection + runbook match)
-  → If runbook matched: Phase B (approval UI → SSH execution)
-  → If no match: Full orchestrator analysis → Teams notification
-```
-
-### Configuration Precedence
-
-Settings are loaded in this order (later overrides earlier):
-1. Bundled defaults (`src/sre_agent/defaults/settings.yaml`)
-2. User config (`~/.config/sre-agent/settings.yaml`)
-3. Local config (`configs/settings.yaml` or `configs/settings.yml`)
-4. `SRE_AGENT_CONFIG` env var (explicit path)
-5. Environment variable overlays: `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL_ID`
-
-## Code Style and Conventions
-
-- **Line length:** 120 characters
-- **Formatter/Linter:** Ruff (target Python 3.11)
-- **Always run `make lint` before committing** to check for issues
-- **Run `make format` to auto-fix** style issues
-- **No pre-commit hooks** are configured; lint manually
-- Config models use **Pydantic v2 BaseModel/BaseSettings** with typed defaults
-- Each agent has a **dedicated system prompt module** in `src/sre_agent/prompts/`
-- MCP servers use **FastMCP** with `@mcp.tool()` decorators
-- Async code uses **`httpx.AsyncClient`** for HTTP calls
-- Tests use **`pytest-asyncio`** with async fixtures
-
-## Testing
+## Common Commands
 
 ```bash
-# Run all tests
+# Install for development (all optional extras + dev deps)
+pip install -e ".[all,dev]"   # or: make install-dev
+
+# Lint / format (Ruff; line length 120, target py311). No pre-commit hooks — run manually.
+make lint        # ruff check src/ && ruff format --check src/
+make format      # ruff check --fix src/ && ruff format src/
+
+# Build / clean
+make build       # python -m build (hatchling)
+make clean
+
+# Run
+sre-agent                     # interactive CLI
+sre-agent serve --port 8080   # pipeline webhook server
+
+# Tests (pytest + pytest-asyncio)
 pytest tests/
-
-# Run specific test file
-pytest tests/unit/test_config.py -v
-
-# Run with async support
+pytest tests/unit/test_config.py -v              # single file
+pytest tests/unit/test_runbook.py::test_name     # single test
 pytest tests/unit/test_runbook.py --asyncio-mode=auto
-```
 
-**Test fixtures** are in `tests/conftest.py` and provide:
-- `sample_alertmanager_payload` - Mock Alertmanager webhook (version 4)
-- `sample_runbook_markdown` - Runbook with YAML frontmatter
-- `sample_match_found_report` / `sample_no_match_report` - Incident analysis reports
-
-### E2E Test Stack
-
-```bash
+# E2E stack (Prometheus + Alertmanager + cAdvisor + Elasticsearch + memory-leak workload)
 docker compose -f docker-compose.test.yaml up -d
 ```
 
-Starts Prometheus, Alertmanager, cAdvisor, Elasticsearch, and a memory-leak test app. The memory-leak app fills memory toward 86% of its 256M limit, triggering a `ContainerMemoryPressure` alert that flows through the full pipeline.
+Optional extras gate specific features: `ssh` pulls in `paramiko` (required for runbook execution), `webhook` pulls in `fastapi`/`uvicorn`/`jinja2`/`markdown` (required for `sre-agent serve`). `all` bundles both.
 
-## Environment Variables
+## Architecture
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
-| `ANTHROPIC_BASE_URL` | No | Override API base URL (default: `https://api.anthropic.com`) |
-| `ANTHROPIC_MODEL_ID` | No | Override model (default: `claude-sonnet-4-20250514`) |
-| `SRE_AGENT_CONFIG` | No | Explicit config file path |
-| `SERVICENOW_INSTANCE_URL` | No | ServiceNow CMDB URL |
-| `SERVICENOW_API_TOKEN` | No | ServiceNow API token |
+### Agent graph
 
-## Key Entry Points
+Each specialist is wrapped as a Strands `Agent` and exposed as a tool on its parent orchestrator. There are three orchestrators:
 
-- **CLI app:** `src/sre_agent/cli.py` → `app` (Typer application)
-- **Agent creation:** `src/sre_agent/agents/orchestrator.py` → `create_orchestrator()`
-- **Config loading:** `src/sre_agent/config.py` → `load_settings()`
-- **Pipeline server:** `src/sre_agent/pipeline/server.py` → FastAPI app
-- **Package entry point:** `sre-agent` CLI command → `sre_agent.cli:app`
+- **`agents/orchestrator.py`** — master orchestrator used by the interactive CLI. Registers all specialists (Data Collector, SSH, RCA, Solution, Runbook Matcher) as tools.
+- **`agents/phase_a_orchestrator.py`** — pipeline Phase A. Runs on every incident; only has Data Collector + Runbook Matcher. Does **not** perform RCA.
+- **`agents/phase_b_orchestrator.py`** — pipeline Phase B. Invoked on user approval; runs RCA + Solution on data already collected by Phase A.
 
-## Security Notes
+RCA and Solution agents are **pure reasoning** — they have no tools. Data Collector and SSH reach out via MCP subprocess servers.
 
-- SSH commands are restricted by a whitelist (`configs/ssh_allowlist.yaml`)
-- Shell metacharacters (`;`, `&&`, `|`, `>`, etc.) are blocked in SSH commands
-- Runbook execution requires human approval via web UI (10-minute timeout)
-- No write operations to monitored systems; all suggestions are advisory
-- Never commit `.env`, `*.pem`, or `*.key` files (excluded in `.gitignore`)
+### MCP servers (`mcp_servers/`)
+
+Each server is a FastMCP stdio subprocess spawned by the Strands agent that owns it. Tools are declared with `@mcp.tool()`. Servers: Prometheus (metrics + alerts), Elasticsearch (logs), ServiceNow CMDB (topology), APM, plus two SSH servers — `ssh_diagnostic_server.py` (read-only diagnostics for Data Collector) and `ssh_server.py` (runbook command execution).
+
+### Pipeline flow (`pipeline/`)
+
+```
+Alertmanager / generic webhook
+ → intake.py     (dedup key, severity routing, grouping)
+ → analyzer.py   (Phase A orchestrator → report with runbook match)
+ → delivery.py   (Teams notification with approval link)
+ → approval.py   (web UI → Phase B → SSH runbook execution)
+```
+
+Phase A always runs. Phase B only runs after a human clicks approval in the web UI (`templates/approval.html`, 10-minute timeout). Runbook output from Phase A includes a structured `visualization_json` block used by the approval page to render Chart.js metric charts.
+
+### Configuration loading (`config.py` → `load_settings()`)
+
+Sources applied in order (later wins):
+1. Bundled `src/sre_agent/defaults/settings.yaml` (shipped in the wheel).
+2. `~/.config/sre-agent/settings.yaml`.
+3. `configs/settings.yaml` (or `.yml`) in the repo.
+4. `SRE_AGENT_CONFIG` env var (explicit path).
+5. Env overlays: `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL_ID`, `SERVICENOW_INSTANCE_URL`, `SERVICENOW_API_TOKEN`.
+
+First-run CLI triggers an interactive wizard that seeds `~/.config/sre-agent/settings.yaml` + `.env`.
+
+### Per-agent tokens and prompts
+
+- `settings.yaml` has an `agent_tokens` block setting `max_tokens` per agent (RCA defaults highest at 8192 — it is reasoning-heavy).
+- Every agent has a dedicated prompt module in `prompts/` (`orchestrator.py`, `phase_a.py`, `phase_b.py`, `data_collector.py`, `rca.py`, `solution.py`, `operator.py`, `ssh.py`). System prompts are in Korean; incident output is a structured Markdown report.
+
+### Callbacks (`callbacks.py`)
+
+Two progress-reporting styles share the same agent code: a Rich-based live display for the CLI, and a plain-logging version for the pipeline. Orchestrators accept `callback_handler` (agent-level) and `tool_callback_handler` (forwarded to sub-agents for MCP tool calls) separately — keep that split when adding new agents.
+
+## Conventions
+
+- **Ruff** is the only lint/format tool (line length 120, target `py311`). No other linters, no pre-commit — run `make lint` before committing.
+- **Pydantic v2** models (`BaseModel` / `BaseSettings`) with explicit typed defaults for all config.
+- **HTTP** calls use `httpx.AsyncClient`; async tests use `pytest-asyncio`.
+- **MCP tools** are declared with FastMCP `@mcp.tool()` decorators; servers run as stdio subprocesses, not HTTP.
+- **Runbooks** live in `src/sre_agent/runbooks/*.md` with YAML frontmatter; only `_template.md` is committed (real runbooks are site-specific). Referenced shell scripts go under `runbooks/scripts/`.
+
+## Security model
+
+- SSH commands must appear in the whitelist (`configs/ssh_allowlist.yaml` / bundled default). Shell metacharacters (`;`, `&&`, `|`, `>`, backticks, etc.) are rejected before execution.
+- No agent writes to monitored systems; all output is advisory. The only write path is runbook execution, which requires human approval in the web UI.
+- When adding new MCP tools, keep them read-only unless they are gated by the approval flow.
+
+## Key entry points
+
+- CLI app: `src/sre_agent/cli.py` → `app` (Typer)
+- Interactive orchestrator: `src/sre_agent/agents/orchestrator.py` → `create_orchestrator()`
+- Pipeline server: `src/sre_agent/pipeline/server.py` (FastAPI)
+- Config loader: `src/sre_agent/config.py` → `load_settings()`
+- Package console script: `sre-agent` → `sre_agent.cli:app`
+
+## Testing notes
+
+Shared fixtures in `tests/conftest.py` cover Alertmanager v4 payloads, runbook markdown with frontmatter, and sample match-found / no-match incident reports. MCP server unit tests live under `tests/unit/mcp_servers/`. The E2E memory-leak scenario (docker compose stack) drives a `ContainerMemoryPressure` alert at ~85% of a 256Mi cgroup limit and exercises the full Alertmanager → pipeline → approval → SSH path; the matching runbook is `memory-leak-restart`.
