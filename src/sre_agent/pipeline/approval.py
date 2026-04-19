@@ -113,7 +113,8 @@ def register_approval_routes(
     @app.get("/approve/{incident_id}", response_model=None)
     async def approval_page(incident_id: str):
         with lock:
-            incident = incidents.get(incident_id)
+            raw = incidents.get(incident_id)
+            incident = dict(raw) if raw else None
 
         if not incident:
             return JSONResponse({"status": "not_found"}, status_code=404)
@@ -187,7 +188,8 @@ def register_approval_routes(
         action = body.get("action", "")
 
         with lock:
-            incident = incidents.get(incident_id)
+            raw = incidents.get(incident_id)
+            incident = dict(raw) if raw else None
 
         if not incident:
             return JSONResponse({"status": "not_found"}, status_code=404)

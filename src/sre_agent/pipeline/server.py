@@ -245,7 +245,7 @@ def create_pipeline_app(settings: Settings):
     async def list_incidents(limit: int = 20) -> dict:
         with _lock:
             items = sorted(
-                _incidents.values(),
+                (dict(v) for v in _incidents.values()),
                 key=lambda x: x.get("received_at", 0),
                 reverse=True,
             )[:limit]
@@ -256,7 +256,7 @@ def create_pipeline_app(settings: Settings):
         with _lock:
             if incident_id not in _incidents:
                 return {"status": "not_found"}
-            return _incidents[incident_id]
+            return dict(_incidents[incident_id])
 
     from sre_agent.pipeline.approval import register_approval_routes
     register_approval_routes(app, _incidents, settings, _lock, rca_callback=_run_phase_b)

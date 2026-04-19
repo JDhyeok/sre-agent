@@ -33,33 +33,35 @@ class PipelineAnalyzer:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._phase_a = None
-        self._phase_b = None
-        self._match_result: dict[str, Any] = {}  # Side-channel for runbook match data
         from sre_agent.callbacks import LoggingProgressTracker
         self._tracker = LoggingProgressTracker(logger)
 
-    def _get_phase_a(self):
-        """Lazy-init Phase A orchestrator (data collector + runbook matcher)."""
-        if self._phase_a is None:
-            from sre_agent.agents.phase_a_orchestrator import create_phase_a_orchestrator
-            self._phase_a, self._match_result = create_phase_a_orchestrator(
-                self._settings,
-                callback_handler=self._tracker.get_orchestrator_handler(),
-                tool_callback_handler=self._tracker.get_tool_handler(),
-            )
-        return self._phase_a
+    def _create_phase_a(self):
+        """Create a fresh Phase A orchestrator for each incident.
 
-    def _get_phase_b(self):
-        """Lazy-init Phase B orchestrator (RCA + solution). Only created on demand."""
-        if self._phase_b is None:
-            from sre_agent.agents.phase_b_orchestrator import create_phase_b_orchestrator
-            self._phase_b = create_phase_b_orchestrator(
-                self._settings,
-                callback_handler=self._tracker.get_orchestrator_handler(),
-                tool_callback_handler=self._tracker.get_tool_handler(),
-            )
-        return self._phase_b
+        A new agent instance is created per invocation to prevent:
+        - Conversation history leaking between incidents (C1)
+        - report_match side-channel dict being shared across concurrent calls (C2)
+        """
+        from sre_agent.agents.phase_a_orchestrator import create_phase_a_orchestrator
+        return create_phase_a_orchestrator(
+            self._settings,
+            callback_handler=self._tracker.get_orchestrator_handler(),
+            tool_callback_handler=self._tracker.get_tool_handler(),
+        )
+
+    def _create_phase_b(self):
+        """Create a fresh Phase B orchestrator for each RCA request.
+
+        Same rationale as _create_phase_a: prevents conversation history
+        leaking between separate RCA analyses.
+        """
+        from sre_agent.agents.phase_b_orchestrator import create_phase_b_orchestrator
+        return create_phase_b_orchestrator(
+            self._settings,
+            callback_handler=self._tracker.get_orchestrator_handler(),
+            tool_callback_handler=self._tracker.get_tool_handler(),
+        )
 
     # -- Phase A: automatic data collection + runbook matching -----------------
 
@@ -84,7 +86,7 @@ class PipelineAnalyzer:
         self._tracker.set_prefix(f"[{request.incident_id}] ")
 
         try:
-            orchestrator = self._get_phase_a()
+            orchestrator, match_result = self._create_phase_a()
             prompt = self._build_phase_a_prompt(context)
             result = orchestrator(prompt)
         except Exception as e:
@@ -101,13 +103,9 @@ class PipelineAnalyzer:
         elapsed = time.time() - start
         report = str(result)
 
-        # Read structured runbook match data from the side-channel
-        # (populated by the report_match tool inside runbook_matcher_agent).
-        runbook_match = dict(self._match_result)  # snapshot
-        # Reset for next invocation (the container is reused across calls).
-        self._match_result.update(
-            {"matched": False, "name": "", "risk": "", "script": "", "target_host_label": ""}
-        )
+        # Read structured runbook match data from the per-call side-channel.
+        # Each invocation gets its own match_result dict, so no race condition.
+        runbook_match = dict(match_result)
         logger.info(
             "Phase A completed for %s in %.1fs (runbook_matched=%s)",
             request.incident_id, elapsed, runbook_match.get("matched", False),
@@ -134,7 +132,7 @@ class PipelineAnalyzer:
         self._tracker.set_prefix(f"[{incident_id}] ")
 
         try:
-            orchestrator = self._get_phase_b()
+            orchestrator = self._create_phase_b()
             prompt = self._build_phase_b_prompt(collected_data)
             result = orchestrator(prompt)
         except Exception as e:
