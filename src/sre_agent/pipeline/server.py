@@ -82,6 +82,33 @@ def create_pipeline_app(settings: Settings):
     _incidents: dict[str, dict[str, Any]] = {}
     _lock = threading.Lock()
 
+    # -- Incident cleanup (TTL-based) -----------------------------------------
+
+    _RETENTION_SECONDS = settings.intake.incident_retention_hours * 3600
+    _CLEANUP_INTERVAL = 600  # run every 10 minutes
+    _TERMINAL_STATUSES = frozenset({
+        "approved", "rejected", "manual_action", "rca_completed",
+        "rca_failed", "failed", "skipped",
+    })
+
+    def _cleanup_loop() -> None:
+        """Periodically remove completed incidents older than the retention TTL."""
+        while True:
+            time.sleep(_CLEANUP_INTERVAL)
+            now = time.time()
+            with _lock:
+                expired = [
+                    iid for iid, data in _incidents.items()
+                    if data.get("status") in _TERMINAL_STATUSES
+                    and now - data.get("received_at", now) > _RETENTION_SECONDS
+                ]
+                for iid in expired:
+                    del _incidents[iid]
+            if expired:
+                logger.info("Incident cleanup: removed %d expired incident(s)", len(expired))
+
+    threading.Thread(target=_cleanup_loop, daemon=True, name="incident-cleanup").start()
+
     # -- Background analysis runner -------------------------------------------
 
     _teams_url = settings.delivery.teams_webhook_url

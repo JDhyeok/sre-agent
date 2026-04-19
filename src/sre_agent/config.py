@@ -77,6 +77,7 @@ class HmgApmConfig(BaseModel):
 class IntakeConfig(BaseModel):
     dedup_window_minutes: int = 5
     group_window_seconds: int = 60
+    incident_retention_hours: int = 72  # Auto-cleanup completed incidents after this TTL
     severity_routing: dict[str, str] = Field(default_factory=lambda: {
         "critical": "full_analysis",
         "warning": "lightweight",

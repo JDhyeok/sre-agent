@@ -107,6 +107,22 @@ def register_approval_routes(
         _md = None
         logger.warning("markdown not installed — approval web UI will show raw markdown")
 
+    # -- RCA thread management ------------------------------------------------
+    import threading as _threading
+    _rca_semaphore = _threading.Semaphore(2)  # max 2 concurrent RCA analyses
+
+    def _safe_rca_runner(incident_id: str) -> None:
+        """Wrapper around rca_callback with error handling and semaphore release."""
+        try:
+            rca_callback(incident_id)
+        except Exception:
+            logger.exception("RCA thread failed for %s", incident_id)
+            with lock:
+                incidents[incident_id]["status"] = "rca_failed"
+                incidents[incident_id]["rca_error"] = "RCA thread crashed unexpectedly"
+        finally:
+            _rca_semaphore.release()
+
     # response_model=None: the return type is a Response subclass union,
     # which is not a valid Pydantic field. Without this, FastAPI raises
     # ``Invalid args for response field`` at route registration.
@@ -204,19 +220,26 @@ def register_approval_routes(
             return JSONResponse({"status": current_status, "error": "Already processed"})
 
         if action == "rca":
-            if current_status == "rca_running":
-                return JSONResponse({"status": "rca_running", "error": "RCA already in progress"})
-            if current_status == "rca_completed":
-                return JSONResponse({"status": "rca_completed", "error": "RCA already completed"})
             if rca_callback is None:
                 return JSONResponse({"status": "error", "error": "RCA not available"}, status_code=500)
 
+            # Atomic check + state transition inside lock to prevent duplicate RCA
             with lock:
+                live_status = incidents[incident_id].get("status", "")
+                if live_status == "rca_running":
+                    return JSONResponse({"status": "rca_running", "error": "RCA already in progress"})
+                if live_status == "rca_completed":
+                    return JSONResponse({"status": "rca_completed", "error": "RCA already completed"})
                 incidents[incident_id]["status"] = "rca_running"
 
-            import threading
-            threading.Thread(
-                target=rca_callback,
+            # Limit concurrent RCA threads to prevent resource exhaustion
+            if not _rca_semaphore.acquire(blocking=False):
+                with lock:
+                    incidents[incident_id]["status"] = current_status  # rollback
+                return JSONResponse({"status": "busy", "error": "RCA queue is full, try again later"})
+
+            _threading.Thread(
+                target=_safe_rca_runner,
                 args=(incident_id,),
                 daemon=True,
             ).start()
